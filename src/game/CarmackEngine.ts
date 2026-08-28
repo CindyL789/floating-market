@@ -8,7 +8,7 @@ export interface RadarBlip {
   id: string;
   x: number;
   y: number;
-  type: 'district' | 'landmark' | 'collectible' | 'storm';
+  type: 'district' | 'landmark' | 'collectible' | 'storm' | 'powerup' | 'enemy' | 'anchor';
   accent: string;
 }
 
@@ -24,6 +24,13 @@ export interface FlightTelemetry {
   playerY: number;
   playerAngle: number;
   radarBlips: RadarBlip[];
+  gliderCharges: number;
+  grappleCharges: number;
+  shockCharges: number;
+  gliderActive: boolean;
+  grappleActive: boolean;
+  combatTargetCount: number;
+  powerUpCount: number;
 }
 
 export interface CarmackEngineOptions {
@@ -37,6 +44,7 @@ export interface CarmackEngineOptions {
 type Vec2 = { x: number; y: number };
 
 type CollectibleType = 'droplet' | 'salvage' | 'storm_charge';
+type PowerUpType = 'wind_glider' | 'grapple_charge' | 'shock_cell' | 'hull_patch';
 
 interface Collectible {
   id: string;
@@ -45,6 +53,35 @@ interface Collectible {
   type: CollectibleType;
   value: number;
   pulse: number;
+}
+
+interface PowerUp {
+  id: string;
+  x: number;
+  y: number;
+  type: PowerUpType;
+  pulse: number;
+}
+
+interface EnemySkiff {
+  id: string;
+  x: number;
+  y: number;
+  phase: number;
+  health: number;
+  attackTimer: number;
+}
+
+interface GrappleAnchor {
+  id: string;
+  name: string;
+  x: number;
+  y: number;
+}
+
+interface GrappleState {
+  anchor: GrappleAnchor;
+  remaining: number;
 }
 
 interface ProjectedPoint {
@@ -77,6 +114,25 @@ const STORM_ZONES = [
   { x: 380, y: 1250, radius: 180 },
   { x: 920, y: 950, radius: 150 },
   { x: 750, y: 150, radius: 140 },
+];
+
+const INITIAL_POWERUPS: PowerUp[] = [
+  { id: 'p-glider-1', x: 630, y: 500, type: 'wind_glider', pulse: 0 },
+  { id: 'p-grapple-1', x: 790, y: 550, type: 'grapple_charge', pulse: 1 },
+  { id: 'p-shock-1', x: 1010, y: 650, type: 'shock_cell', pulse: 2 },
+  { id: 'p-hull-1', x: 1260, y: 720, type: 'hull_patch', pulse: 3 },
+];
+
+const INITIAL_ENEMIES: EnemySkiff[] = [
+  { id: 'raider-1', x: 980, y: 620, phase: 0.3, health: 1, attackTimer: 0 },
+  { id: 'raider-2', x: 1320, y: 820, phase: 1.7, health: 1, attackTimer: 1.2 },
+  { id: 'raider-3', x: 420, y: 1190, phase: 3.2, health: 1, attackTimer: 2.4 },
+];
+
+const GRAPPLE_ANCHORS: GrappleAnchor[] = [
+  { id: 'anchor-turbines', name: 'Cloud-Harvester Array', x: 800, y: 550 },
+  { id: 'anchor-chain', name: 'Mooring Chain Link #4', x: 280, y: 1150 },
+  { id: 'anchor-astrolabe', name: 'Zenith Astrolabe Beacon', x: 1100, y: 120 },
 ];
 
 const INITIAL_COLLECTIBLES: Collectible[] = [
@@ -138,6 +194,16 @@ export class CarmackEngine {
   private keys: Record<string, boolean> = {};
   private joystick = { active: false, x: 0, y: 0 };
   private collectibles: Collectible[] = INITIAL_COLLECTIBLES.map(item => ({ ...item }));
+  private powerUps: PowerUp[] = INITIAL_POWERUPS.map(item => ({ ...item }));
+  private enemies: EnemySkiff[] = INITIAL_ENEMIES.map(item => ({ ...item }));
+  private grappleAnchors: GrappleAnchor[] = GRAPPLE_ANCHORS.map(item => ({ ...item }));
+  private grapple: GrappleState | null = null;
+  private gliderTimer = 0;
+  private gliderCharges = 1;
+  private grappleCharges = 1;
+  private shockCharges = 2;
+  private shockPulseTimer = 0;
+  private shockPulseHit = false;
   private koiSegments: Vec2[];
 
   constructor(options: CarmackEngineOptions) {
@@ -227,6 +293,9 @@ export class CarmackEngine {
     if (key === '1') this.setLantern('beacon');
     if (key === '2') this.setLantern('signal');
     if (key === '3') this.setLantern('ward');
+    if (key === 'g') this.activateGrapple();
+    if (key === 'b') this.activateGlider();
+    if (key === 'x') this.fireShockPulse();
 
     if ((key === 'f' || key === 'e') && this.telemetry().nearbyDistrict) {
       this.onDock(this.telemetry().nearbyDistrict as DistrictId);
@@ -262,7 +331,9 @@ export class CarmackEngine {
       thrust += -this.joystick.y * 1.5;
     }
 
-    const accel = rig?.id === 'standard_courier' ? 140 : 110;
+    const gliderActive = this.gliderTimer > 0;
+    if (gliderActive) this.gliderTimer = Math.max(0, this.gliderTimer - dt);
+    const accel = (rig?.id === 'standard_courier' ? 140 : 110) * (gliderActive ? 1.35 : 1);
     this.angle += turning * 2.8 * dt;
     this.velocity.x += Math.cos(this.angle) * thrust * accel * dt;
     this.velocity.y += Math.sin(this.angle) * thrust * accel * dt;
@@ -283,7 +354,7 @@ export class CarmackEngine {
     const hasAeroSails = (state.unlockedSkills || []).includes('sail_aerodynamics');
     const currentSpeed = Math.hypot(this.velocity.x, this.velocity.y);
     const baseMaxSpeed = wind ? 320 : (keys[' '] || keys.space ? 260 : 190);
-    const maxSpeed = baseMaxSpeed * (hasAeroSails ? 1.25 : 1);
+    const maxSpeed = baseMaxSpeed * (hasAeroSails ? 1.25 : 1) * (gliderActive ? 1.45 : 1);
     if (currentSpeed > maxSpeed) {
       this.velocity.x = (this.velocity.x / currentSpeed) * maxSpeed;
       this.velocity.y = (this.velocity.y / currentSpeed) * maxSpeed;
@@ -294,8 +365,12 @@ export class CarmackEngine {
 
     this.updateKoi(dt, time);
     this.updateCollectibles(dt, time, state);
+    this.updatePowerUps(dt, time, state);
+    this.updateEnemies(dt, state);
+    this.updateGrapple(dt);
     this.updateStorm(dt, state);
     this.updateSpatialAudio(dt);
+    this.shockPulseTimer = Math.max(0, this.shockPulseTimer - dt);
 
     this.telemetryTimer += dt;
     if (this.telemetryTimer > 0.12) {
@@ -407,6 +482,144 @@ export class CarmackEngine {
     this.collectibles = this.collectibles.filter(item => item.x > -1000);
   }
 
+  private activateGrapple(): void {
+    if (this.grapple || this.grappleCharges <= 0) return;
+    const forwardX = Math.cos(this.angle);
+    const forwardY = Math.sin(this.angle);
+    let bestAnchor: GrappleAnchor | null = null;
+    let bestScore = Infinity;
+    for (const anchor of this.grappleAnchors) {
+      const dx = anchor.x - this.pos.x;
+      const dy = anchor.y - this.pos.y;
+      const depth = dx * forwardX + dy * forwardY;
+      const anchorDistance = Math.hypot(dx, dy);
+      if (depth > 35 && anchorDistance < 980) {
+        const lateral = Math.abs(dx * -forwardY + dy * forwardX);
+        const score = anchorDistance + lateral * 1.8;
+        if (score < bestScore) {
+          bestScore = score;
+          bestAnchor = anchor;
+        }
+      }
+    }
+    if (!bestAnchor) return;
+    this.grappleCharges -= 1;
+    this.grapple = { anchor: bestAnchor, remaining: 1.25 };
+    this.velocity.x = 0;
+    this.velocity.y = 0;
+    sound.playGrappleLaunch();
+  }
+
+  private activateGlider(): void {
+    if (this.gliderTimer > 0 || this.gliderCharges <= 0) return;
+    this.gliderCharges -= 1;
+    this.gliderTimer = 5.5;
+    this.velocity.x += Math.cos(this.angle) * 115;
+    this.velocity.y += Math.sin(this.angle) * 115;
+    sound.playPowerUp('wind_glider');
+    this.updateState(previous => ({
+      ...previous,
+      logMessages: [{ id: Date.now().toString(), text: 'Wind-glider deployed. The skiff catches a high-altitude slipstream.', time: 'Just now', type: 'info' }, ...previous.logMessages],
+    }));
+  }
+
+  private fireShockPulse(): void {
+    if (this.shockCharges <= 0) return;
+    this.shockCharges -= 1;
+    this.shockPulseTimer = 0.5;
+    this.shockPulseHit = false;
+    sound.playShockPulse();
+
+    let defeated = 0;
+    for (const enemy of this.enemies) {
+      if (enemy.health <= 0) continue;
+      const enemyDistance = distance(this.pos, enemy);
+      const dx = enemy.x - this.pos.x;
+      const dy = enemy.y - this.pos.y;
+      const forwardDistance = dx * Math.cos(this.angle) + dy * Math.sin(this.angle);
+      if (enemyDistance < 310 && forwardDistance > 0) {
+        enemy.health = 0;
+        defeated += 1;
+      }
+    }
+    if (defeated > 0) {
+      this.shockPulseHit = true;
+      this.updateState(previous => ({
+        ...previous,
+        favors: previous.favors + defeated,
+        logMessages: [{ id: Date.now().toString(), text: `Shock pulse scattered ${defeated} raider skiff${defeated > 1 ? 's' : ''}. +${defeated} Favor`, time: 'Just now', type: 'reward' }, ...previous.logMessages],
+      }));
+    }
+  }
+
+  private updatePowerUps(dt: number, time: number, state: GameState): void {
+    for (const powerUp of this.powerUps) {
+      powerUp.pulse = time * 0.004 + powerUp.pulse;
+      if (distance(this.pos, powerUp) > 56) continue;
+      const label = powerUp.type === 'wind_glider' ? 'Wind-Glider Charge' : powerUp.type === 'grapple_charge' ? 'Grapple Charge' : powerUp.type === 'shock_cell' ? 'Shock Cell' : 'Hull Patch';
+      sound.playPowerUp(powerUp.type);
+      if (powerUp.type === 'wind_glider') this.gliderCharges += 1;
+      if (powerUp.type === 'grapple_charge') this.grappleCharges += 1;
+      if (powerUp.type === 'shock_cell') this.shockCharges += 1;
+      if (powerUp.type === 'hull_patch') {
+        this.updateState(previous => ({ ...previous, stats: { ...previous.stats, hullIntegrity: Math.min(previous.stats.maxHull, previous.stats.hullIntegrity + 22) } }));
+      }
+      this.updateState(previous => ({
+        ...previous,
+        logMessages: [{ id: Date.now().toString(), text: `Power-up acquired: ${label}.`, time: 'Just now', type: 'reward' }, ...previous.logMessages],
+      }));
+      powerUp.x = -9999;
+      powerUp.y = -9999;
+    }
+    this.powerUps = this.powerUps.filter(item => item.x > -1000);
+  }
+
+  private updateEnemies(dt: number, state: GameState): void {
+    const protectedByLantern = this.lanternMode === 'ward' || state.activeRig === 'storm_run';
+    for (const enemy of this.enemies) {
+      if (enemy.health <= 0) continue;
+      enemy.phase += dt;
+      enemy.attackTimer += dt;
+      const driftRadius = 18;
+      enemy.x += Math.cos(enemy.phase * 0.9) * driftRadius * dt;
+      enemy.y += Math.sin(enemy.phase * 1.15) * driftRadius * dt;
+      const enemyDistance = distance(this.pos, enemy);
+      if (enemyDistance < 300 && enemy.attackTimer > 2.2) {
+        enemy.attackTimer = 0;
+        if (!protectedByLantern) {
+          sound.playEnemyPulse();
+          this.updateState(previous => ({
+            ...previous,
+            stats: { ...previous.stats, hullIntegrity: Math.max(0, previous.stats.hullIntegrity - 8) },
+            logMessages: [{ id: Date.now().toString(), text: 'Raider skiff pulse hit the hull. Use X to fire a shock pulse.', time: 'Just now', type: 'hazard' }, ...previous.logMessages],
+          }));
+        }
+      }
+    }
+    this.enemies = this.enemies.filter(enemy => enemy.health > 0);
+  }
+
+  private updateGrapple(dt: number): void {
+    if (!this.grapple) return;
+    const anchor = this.grapple.anchor;
+    const dx = anchor.x - this.pos.x;
+    const dy = anchor.y - this.pos.y;
+    const anchorDistance = Math.hypot(dx, dy) || 1;
+    const forwardX = Math.cos(this.angle);
+    const forwardY = Math.sin(this.angle);
+    const target = { x: anchor.x - forwardX * 62, y: anchor.y - forwardY * 62 };
+    this.pos.x = lerp(this.pos.x, target.x, Math.min(1, dt * 5.5));
+    this.pos.y = lerp(this.pos.y, target.y, Math.min(1, dt * 5.5));
+    this.velocity.x = lerp(this.velocity.x, (dx / anchorDistance) * 120, Math.min(1, dt * 4));
+    this.velocity.y = lerp(this.velocity.y, (dy / anchorDistance) * 120, Math.min(1, dt * 4));
+    this.grapple.remaining -= dt;
+    if (this.grapple.remaining <= 0 || anchorDistance < 82) {
+      this.grapple = null;
+      this.velocity.x *= 0.35;
+      this.velocity.y *= 0.35;
+    }
+  }
+
   private updateStorm(dt: number, state: GameState): void {
     const inStorm = STORM_ZONES.some(zone => distance(this.pos, zone) < zone.radius);
     if (!inStorm) {
@@ -496,8 +709,18 @@ export class CarmackEngine {
         ...(Object.values(DISTRICTS).map(district => ({ id: district.id, x: district.coordinates.x, y: district.coordinates.y, type: 'district' as const, accent: district.accentColor }))),
         ...(LANDMARKS.filter(landmark => !landmark.districtId).map(landmark => ({ id: landmark.id, x: landmark.coordinates.x, y: landmark.coordinates.y, type: 'landmark' as const, accent: landmark.type === 'hazard_zone' ? '#f43f5e' : '#c084fc' }))),
         ...(this.collectibles.map(item => ({ id: item.id, x: item.x, y: item.y, type: 'collectible' as const, accent: item.type === 'salvage' ? '#f59e0b' : item.type === 'storm_charge' ? '#a78bfa' : '#38bdf8' }))),
+        ...(this.powerUps.map(item => ({ id: item.id, x: item.x, y: item.y, type: 'powerup' as const, accent: item.type === 'wind_glider' ? '#2dd4bf' : item.type === 'grapple_charge' ? '#f59e0b' : item.type === 'shock_cell' ? '#f43f5e' : '#a3e635' }))),
+        ...(this.enemies.map(item => ({ id: item.id, x: item.x, y: item.y, type: 'enemy' as const, accent: '#f43f5e' }))),
+        ...(this.grappleAnchors.map(item => ({ id: item.id, x: item.x, y: item.y, type: 'anchor' as const, accent: '#f9c74f' }))),
         ...(STORM_ZONES.map((zone, index) => ({ id: `storm-${index}`, x: zone.x, y: zone.y, type: 'storm' as const, accent: '#818cf8' }))),
       ],
+      gliderCharges: this.gliderCharges,
+      grappleCharges: this.grappleCharges,
+      shockCharges: this.shockCharges,
+      gliderActive: this.gliderTimer > 0,
+      grappleActive: Boolean(this.grapple),
+      combatTargetCount: this.enemies.length,
+      powerUpCount: this.powerUps.length,
     };
   }
 
@@ -531,6 +754,8 @@ export class CarmackEngine {
     this.renderCloudFloor(time);
     this.renderWorld(time);
     this.renderKoi(time);
+    this.renderGrappleLine();
+    this.renderShockPulse(time);
     this.renderSkiff(time);
     this.renderScanlines();
     this.renderVignette();
@@ -664,6 +889,24 @@ export class CarmackEngine {
       const projected = this.project({ x: collectible.x, y: collectible.y });
       if (!projected || projected.x < -300 || projected.x > this.width + 300) continue;
       renderables.push({ depth: projected.depth, render: () => this.renderCollectible(collectible, projected, time) });
+    }
+
+    for (const powerUp of this.powerUps) {
+      const projected = this.project(powerUp);
+      if (!projected || projected.x < -300 || projected.x > this.width + 300) continue;
+      renderables.push({ depth: projected.depth, render: () => this.renderPowerUp(powerUp, projected, time) });
+    }
+
+    for (const enemy of this.enemies) {
+      const projected = this.project(enemy);
+      if (!projected || projected.x < -400 || projected.x > this.width + 400) continue;
+      renderables.push({ depth: projected.depth, render: () => this.renderEnemy(enemy, projected, time) });
+    }
+
+    for (const anchor of this.grappleAnchors) {
+      const projected = this.project(anchor);
+      if (!projected || projected.x < -400 || projected.x > this.width + 400) continue;
+      renderables.push({ depth: projected.depth, render: () => this.renderGrappleAnchor(anchor, projected, time) });
     }
 
     for (const zone of STORM_ZONES) {
@@ -885,6 +1128,105 @@ export class CarmackEngine {
     ctx.restore();
   }
 
+  private renderPowerUp(powerUp: PowerUp, projected: ProjectedPoint, time: number): void {
+    const ctx = this.ctx;
+    const size = clamp(24 * projected.scale, 4, 32);
+    const bob = Math.sin(time * 0.005 + powerUp.pulse) * size * 0.25;
+    const y = projected.groundY - size * 1.8 + bob;
+    const color = powerUp.type === 'wind_glider' ? '#2dd4bf' : powerUp.type === 'grapple_charge' ? '#f59e0b' : powerUp.type === 'shock_cell' ? '#f43f5e' : '#a3e635';
+    const glyph = powerUp.type === 'wind_glider' ? '»' : powerUp.type === 'grapple_charge' ? '⌁' : powerUp.type === 'shock_cell' ? '×' : '+';
+
+    ctx.save();
+    ctx.globalAlpha = clamp(1.25 - projected.depth / 1800, 0.48, 1);
+    ctx.translate(projected.x, y);
+    ctx.rotate(Math.sin(time * 0.002 + powerUp.pulse) * 0.15);
+    ctx.shadowBlur = Math.min(28, size * 2);
+    ctx.shadowColor = color;
+    ctx.fillStyle = 'rgba(4, 16, 27, 0.92)';
+    ctx.strokeStyle = color;
+    ctx.lineWidth = Math.max(1, size * 0.1);
+    ctx.beginPath();
+    ctx.moveTo(0, -size);
+    ctx.lineTo(size * 0.78, -size * 0.42);
+    ctx.lineTo(size * 0.78, size * 0.42);
+    ctx.lineTo(0, size);
+    ctx.lineTo(-size * 0.78, size * 0.42);
+    ctx.lineTo(-size * 0.78, -size * 0.42);
+    ctx.closePath();
+    ctx.fill();
+    ctx.stroke();
+    ctx.shadowBlur = 0;
+    ctx.fillStyle = color;
+    ctx.font = `bold ${Math.max(8, size * 1.15)}px ui-monospace, monospace`;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(glyph, 0, 0);
+    ctx.restore();
+  }
+
+  private renderEnemy(enemy: EnemySkiff, projected: ProjectedPoint, time: number): void {
+    const ctx = this.ctx;
+    const size = clamp(30 * projected.scale, 4, 42);
+    const y = projected.groundY - size * 1.2 + Math.sin(time * 0.004 + enemy.phase) * size * 0.16;
+    ctx.save();
+    ctx.globalAlpha = clamp(1.25 - projected.depth / 1700, 0.5, 1);
+    ctx.translate(projected.x, y);
+    ctx.shadowBlur = Math.min(24, size * 1.4);
+    ctx.shadowColor = '#f43f5e';
+    ctx.fillStyle = '#240d24';
+    ctx.strokeStyle = '#f43f5e';
+    ctx.lineWidth = Math.max(1, size * 0.08);
+    ctx.beginPath();
+    ctx.moveTo(-size * 1.15, size * 0.32);
+    ctx.lineTo(-size * 0.42, -size * 0.34);
+    ctx.lineTo(size * 0.45, -size * 0.28);
+    ctx.lineTo(size * 1.15, size * 0.32);
+    ctx.lineTo(size * 0.55, size * 0.62);
+    ctx.lineTo(-size * 0.62, size * 0.62);
+    ctx.closePath();
+    ctx.fill();
+    ctx.stroke();
+    ctx.fillStyle = '#ff9b45';
+    ctx.fillRect(-size * 0.19, size * 0.04, size * 0.38, size * 0.22);
+    ctx.fillStyle = '#f43f5e';
+    ctx.beginPath();
+    ctx.moveTo(-size * 0.2, -size * 0.3);
+    ctx.lineTo(0, -size * 0.98);
+    ctx.lineTo(size * 0.25, -size * 0.3);
+    ctx.closePath();
+    ctx.fill();
+    ctx.shadowBlur = 0;
+    ctx.strokeStyle = 'rgba(244, 63, 94, 0.7)';
+    ctx.lineWidth = Math.max(1, size * 0.05);
+    ctx.beginPath();
+    ctx.arc(0, 0, size * 1.15, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.restore();
+  }
+
+  private renderGrappleAnchor(anchor: GrappleAnchor, projected: ProjectedPoint, time: number): void {
+    const ctx = this.ctx;
+    const size = clamp(25 * projected.scale, 4, 30);
+    const y = projected.groundY - size * 1.15;
+    ctx.save();
+    ctx.globalAlpha = clamp(1.25 - projected.depth / 1600, 0.42, 1);
+    ctx.translate(projected.x, y);
+    ctx.shadowBlur = Math.min(26, size * 1.8);
+    ctx.shadowColor = '#f9c74f';
+    ctx.strokeStyle = '#f9c74f';
+    ctx.lineWidth = Math.max(1, size * 0.14);
+    ctx.beginPath();
+    ctx.arc(0, 0, size * 0.62, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.fillStyle = '#203849';
+    ctx.fillRect(-size * 0.16, -size * 1.12, size * 0.32, size * 0.54);
+    ctx.fillStyle = '#f9c74f';
+    ctx.globalAlpha = 0.7 + Math.sin(time * 0.004 + anchor.x) * 0.2;
+    ctx.fillRect(-size * 0.22, -size * 0.16, size * 0.44, size * 0.32);
+    ctx.shadowBlur = 0;
+    ctx.restore();
+  }
+
   private renderCollectible(item: Collectible, projected: ProjectedPoint, time: number): void {
     const ctx = this.ctx;
     const scale = clamp(projected.scale, 0.02, 2);
@@ -961,6 +1303,43 @@ export class CarmackEngine {
       ctx.fill();
       ctx.restore();
     }
+  }
+
+  private renderGrappleLine(): void {
+    if (!this.grapple) return;
+    const projected = this.project(this.grapple.anchor);
+    if (!projected) return;
+    const ctx = this.ctx;
+    ctx.save();
+    ctx.strokeStyle = '#f9c74f';
+    ctx.shadowBlur = 12;
+    ctx.shadowColor = '#f59e0b';
+    ctx.globalAlpha = 0.9;
+    ctx.lineWidth = Math.max(1.5, this.width * 0.0025);
+    ctx.setLineDash([7, 5]);
+    ctx.beginPath();
+    ctx.moveTo(this.width / 2, this.height * 0.76);
+    ctx.lineTo(projected.x, projected.groundY - 18 * projected.scale);
+    ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.restore();
+  }
+
+  private renderShockPulse(time: number): void {
+    if (this.shockPulseTimer <= 0) return;
+    const ctx = this.ctx;
+    const progress = 1 - this.shockPulseTimer / 0.5;
+    const radius = this.width * (0.04 + progress * 0.42);
+    ctx.save();
+    ctx.globalAlpha = (1 - progress) * 0.85;
+    ctx.strokeStyle = this.shockPulseHit ? '#fef08a' : '#f43f5e';
+    ctx.shadowBlur = 18;
+    ctx.shadowColor = this.shockPulseHit ? '#f59e0b' : '#f43f5e';
+    ctx.lineWidth = Math.max(2, this.width * 0.004);
+    ctx.beginPath();
+    ctx.ellipse(this.width / 2, this.height * 0.58, radius, radius * 0.38, 0, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.restore();
   }
 
   private renderSkiff(time: number): void {

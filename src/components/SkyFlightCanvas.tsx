@@ -21,6 +21,13 @@ const DEFAULT_TELEMETRY: FlightTelemetry = {
   playerY: 0,
   playerAngle: 0,
   radarBlips: [],
+  gliderCharges: 1,
+  grappleCharges: 1,
+  shockCharges: 2,
+  gliderActive: false,
+  grappleActive: false,
+  combatTargetCount: 0,
+  powerUpCount: 0,
 };
 
 const lanternModes: { id: LanternMode; label: string; key: string; icon: React.ReactNode }[] = [
@@ -119,6 +126,7 @@ export const SkyFlightCanvas: React.FC<Props> = ({ gameState, setGameState, onDo
               </div>
               <span className="font-mono text-[10px] text-slate-200">{Math.round(gameState.stats.hullIntegrity)}%</span>
             </div>
+            <CombatPanel telemetry={telemetry} />
           </div>
 
           <div className="hidden items-start gap-5 rounded border border-white/10 bg-[#030b18]/75 px-4 py-2 text-right font-mono backdrop-blur-sm sm:flex">
@@ -171,6 +179,9 @@ export const SkyFlightCanvas: React.FC<Props> = ({ gameState, setGameState, onDo
               <kbd className="rounded border border-white/20 px-1.5 py-0.5 text-slate-200">WASD</kbd> / <kbd className="rounded border border-white/20 px-1.5 py-0.5 text-slate-200">ARROWS</kbd> MOVE
               <kbd className="ml-1 rounded border border-white/20 px-1.5 py-0.5 text-slate-200">SPACE</kbd> BOOST
               <kbd className="ml-1 rounded border border-white/20 px-1.5 py-0.5 text-slate-200">F</kbd> DOCK
+              <kbd className="ml-1 rounded border border-teal-300/40 px-1.5 py-0.5 text-teal-200">B</kbd> GLIDE
+              <kbd className="ml-1 rounded border border-amber-300/40 px-1.5 py-0.5 text-amber-200">G</kbd> GRAPPLE
+              <kbd className="ml-1 rounded border border-rose-300/40 px-1.5 py-0.5 text-rose-200">X</kbd> SHOCK
             </div>
           </div>
 
@@ -214,12 +225,31 @@ const MiniRadar = ({ telemetry, waypoint }: { telemetry: FlightTelemetry; waypoi
         <div className="absolute left-1/2 top-1/2 h-16 w-16 -translate-x-1/2 -translate-y-1/2 rounded-full border border-cyan-300/15" />
         <div className="absolute left-1/2 top-1/2 h-9 w-9 -translate-x-1/2 -translate-y-1/2 rounded-full border border-cyan-300/15" />
         {visibleBlips.map((blip: RadarBlip) => (
-          <span key={blip.id} title={blip.id} className={`absolute block -translate-x-1/2 -translate-y-1/2 ${blip.type === 'storm' ? 'h-2.5 w-2.5 rounded-full border border-violet-200 bg-violet-400/70 shadow-[0_0_10px_#8b5cf6]' : blip.type === 'district' ? 'h-2 w-2 rotate-45 border border-amber-100 bg-amber-300 shadow-[0_0_9px_#f59e0b]' : blip.type === 'collectible' ? 'h-1.5 w-1.5 rounded-full bg-cyan-300 shadow-[0_0_8px_#38bdf8]' : 'h-1 w-1 rounded-full bg-fuchsia-300'}`} style={{ left: `${toPercentX(blip.x)}%`, top: `${toPercentY(blip.y)}%`, backgroundColor: blip.type === 'storm' || blip.type === 'district' || blip.type === 'collectible' ? undefined : blip.accent }} />
+          <span key={blip.id} title={blip.id} className={`absolute block -translate-x-1/2 -translate-y-1/2 ${blip.type === 'storm' ? 'h-2.5 w-2.5 rounded-full border border-violet-200 bg-violet-400/70 shadow-[0_0_10px_#8b5cf6]' : blip.type === 'district' ? 'h-2 w-2 rotate-45 border border-amber-100 bg-amber-300 shadow-[0_0_9px_#f59e0b]' : blip.type === 'collectible' ? 'h-1.5 w-1.5 rounded-full bg-cyan-300 shadow-[0_0_8px_#38bdf8]' : blip.type === 'powerup' ? 'h-2 w-2 rotate-45 border border-teal-100 bg-teal-300 shadow-[0_0_8px_#2dd4bf]' : blip.type === 'enemy' ? 'h-2 w-2 rounded-sm border border-rose-100 bg-rose-400 shadow-[0_0_8px_#f43f5e]' : blip.type === 'anchor' ? 'h-1.5 w-1.5 rounded-full border border-amber-100 bg-amber-200 shadow-[0_0_8px_#f9c74f]' : 'h-1 w-1 rounded-full bg-fuchsia-300'}`} style={{ left: `${toPercentX(blip.x)}%`, top: `${toPercentY(blip.y)}%`, backgroundColor: blip.type === 'storm' || blip.type === 'district' || blip.type === 'collectible' || blip.type === 'powerup' || blip.type === 'enemy' || blip.type === 'anchor' ? undefined : blip.accent }} />
         ))}
         {waypoint && <span className="absolute block h-2 w-2 animate-pulse rounded-full border border-white bg-cyan-300 shadow-[0_0_10px_#fff]" style={{ left: `${toPercentX(waypoint.x)}%`, top: `${toPercentY(waypoint.y)}%` }} />}
         <span className="absolute z-10 -translate-x-1/2 -translate-y-1/2 text-cyan-100 drop-shadow-[0_0_6px_#22d3ee]" style={{ left: `${toPercentX(telemetry.playerX)}%`, top: `${toPercentY(telemetry.playerY)}%`, transform: `translate(-50%, -50%) rotate(${telemetry.playerAngle * 180 / Math.PI + 90}deg)` }}><Navigation size={14} fill="currentColor" /></span>
       </div>
-      <div className="mt-1.5 flex items-center justify-between text-[8px] tracking-[0.12em] text-slate-500"><span><i className="mr-1 inline-block h-1.5 w-1.5 rotate-45 bg-amber-300" />DOCKS</span><span><i className="mr-1 inline-block h-1.5 w-1.5 rounded-full bg-violet-400" />STORMS</span><span>{Math.round(telemetry.playerX)},{Math.round(telemetry.playerY)}</span></div>
+      <div className="mt-1.5 flex items-center justify-between text-[8px] tracking-[0.12em] text-slate-500"><span><i className="mr-1 inline-block h-1.5 w-1.5 rotate-45 bg-amber-300" />DOCKS</span><span><i className="mr-1 inline-block h-1.5 w-1.5 rounded-sm bg-rose-400" />RAIDERS</span><span><i className="mr-1 inline-block h-1.5 w-1.5 rounded-full bg-violet-400" />STORMS</span></div>
+    </div>
+  );
+};
+
+const CombatPanel = ({ telemetry }: { telemetry: FlightTelemetry }) => {
+  const trigger = (key: string) => window.dispatchEvent(new KeyboardEvent('keydown', { key }));
+  const Action = ({ keyName, label, count, icon, active, accent }: { keyName: string; label: string; count: number; icon: React.ReactNode; active?: boolean; accent: 'teal' | 'amber' | 'rose' }) => {
+    const activeClass = accent === 'teal' ? 'border-teal-300 bg-teal-300/15 text-teal-100' : accent === 'amber' ? 'border-amber-300 bg-amber-300/15 text-amber-100' : 'border-rose-300 bg-rose-300/15 text-rose-100';
+    return (
+    <button onClick={() => trigger(keyName)} className={`pointer-events-auto flex items-center gap-1.5 rounded border px-2 py-1.5 font-mono text-[9px] font-bold tracking-[0.12em] transition ${active ? activeClass : 'border-white/10 bg-[#030b18]/70 text-slate-400 hover:border-white/25 hover:text-white'}`} title={`${label} [${keyName.toUpperCase()}]`}>
+      {icon}<span>{label}</span><b className="text-slate-200">{count}</b><kbd className="ml-auto rounded border border-white/20 px-1 text-[8px] text-slate-500">{keyName.toUpperCase()}</kbd>
+    </button>
+    );
+  };
+  return (
+    <div className="flex max-w-[286px] flex-wrap gap-1.5 rounded border border-white/10 bg-[#030b18]/70 p-1.5 font-mono backdrop-blur-sm">
+      <Action keyName="b" label="GLIDER" count={telemetry.gliderCharges} icon={<Wind size={12} />} active={telemetry.gliderActive} accent="teal" />
+      <Action keyName="g" label="GRAPPLE" count={telemetry.grappleCharges} icon={<Anchor size={12} />} active={telemetry.grappleActive} accent="amber" />
+      <Action keyName="x" label="SHOCK" count={telemetry.shockCharges} icon={<Zap size={12} />} active={telemetry.combatTargetCount > 0} accent="rose" />
     </div>
   );
 };

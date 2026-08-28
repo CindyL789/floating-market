@@ -140,6 +140,71 @@ class SoundEngine {
     this.flightStormPanner = null;
   }
 
+  public playPowerUp(type: 'wind_glider' | 'grapple_charge' | 'shock_cell' | 'hull_patch') {
+    if (this.isMuted) return;
+    this.initContext();
+    if (!this.ctx || !this.masterGain) return;
+    const base = type === 'wind_glider' ? 420 : type === 'grapple_charge' ? 300 : type === 'shock_cell' ? 180 : 520;
+    const osc = this.ctx.createOscillator();
+    const gain = this.ctx.createGain();
+    osc.type = type === 'hull_patch' ? 'sine' : 'triangle';
+    osc.frequency.setValueAtTime(base, this.ctx.currentTime);
+    osc.frequency.exponentialRampToValueAtTime(base * 1.8, this.ctx.currentTime + 0.22);
+    gain.gain.setValueAtTime(0.18, this.ctx.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.001, this.ctx.currentTime + 0.35);
+    osc.connect(gain).connect(this.masterGain);
+    osc.start();
+    osc.stop(this.ctx.currentTime + 0.36);
+  }
+
+  public playGrappleLaunch() {
+    if (this.isMuted) return;
+    this.initContext();
+    if (!this.ctx || !this.masterGain) return;
+    const osc = this.ctx.createOscillator();
+    const gain = this.ctx.createGain();
+    osc.type = 'square';
+    osc.frequency.setValueAtTime(150, this.ctx.currentTime);
+    osc.frequency.exponentialRampToValueAtTime(720, this.ctx.currentTime + 0.32);
+    gain.gain.setValueAtTime(0.18, this.ctx.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.001, this.ctx.currentTime + 0.42);
+    osc.connect(gain).connect(this.masterGain);
+    osc.start();
+    osc.stop(this.ctx.currentTime + 0.44);
+  }
+
+  public playShockPulse() {
+    if (this.isMuted) return;
+    this.initContext();
+    if (!this.ctx || !this.masterGain) return;
+    const osc = this.ctx.createOscillator();
+    const gain = this.ctx.createGain();
+    osc.type = 'sawtooth';
+    osc.frequency.setValueAtTime(480, this.ctx.currentTime);
+    osc.frequency.exponentialRampToValueAtTime(72, this.ctx.currentTime + 0.38);
+    gain.gain.setValueAtTime(0.22, this.ctx.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.001, this.ctx.currentTime + 0.48);
+    osc.connect(gain).connect(this.masterGain);
+    osc.start();
+    osc.stop(this.ctx.currentTime + 0.5);
+  }
+
+  public playEnemyPulse() {
+    if (this.isMuted) return;
+    this.initContext();
+    if (!this.ctx || !this.masterGain) return;
+    const osc = this.ctx.createOscillator();
+    const gain = this.ctx.createGain();
+    osc.type = 'square';
+    osc.frequency.setValueAtTime(110, this.ctx.currentTime);
+    osc.frequency.exponentialRampToValueAtTime(48, this.ctx.currentTime + 0.22);
+    gain.gain.setValueAtTime(0.14, this.ctx.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.001, this.ctx.currentTime + 0.3);
+    osc.connect(gain).connect(this.masterGain);
+    osc.start();
+    osc.stop(this.ctx.currentTime + 0.32);
+  }
+
   // Play a shimmering moon-koi chime (pentatonic scale)
   public playMoonChime(freq: number = 440) {
     if (this.isMuted) return;

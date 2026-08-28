@@ -14,3 +14,7 @@
 - Added `SoundEngine.updateFlightSpatialAudio()` and `disposeFlightSpatialAudio()` with stereo panning and intensity-driven wind/storm oscillators; the engine updates these from nearby wind-current and storm-front geometry and cleans them up on unmount.
 - Added procedural architectural facades to district gates: tiled wall planes, brass bands, glowing windows, roof triangles, banners, and plank/deck detailing, all depth-scaled by the raycaster.
 - Browser visual check shows the radar and detailed facade silhouettes in flight view; console has no runtime errors.
+
+## Flight combat pass
+
+The flight deck now has collectible power-ups for wind-glider charges, grappling charges, shock cells, and hull patches. B deploys a timed high-speed wind-glider boost, G fires a directional grapple toward the best forward anchor and pulls the skiff through space, and X fires a forward shock pulse that can scatter raider skiffs. Raider skiffs drift through the world and periodically damage the hull unless the Ward lantern or Storm-Run rig protects the player. Combat HUD buttons, charge counters, radar markers, procedural entity visuals, and synthesized action cues are integrated. TypeScript, production build, browser action smoke tests, and console checks passed.

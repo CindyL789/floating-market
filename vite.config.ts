@@ -5,6 +5,9 @@ import {defineConfig} from 'vite';
 
 export default defineConfig(() => {
   return {
+    // GitHub Pages serves this repository beneath /floating-market/.
+    // Local development remains available at http://localhost:3000/.
+    base: process.env.GITHUB_ACTIONS ? '/floating-market/' : '/',
     plugins: [react(), tailwindcss()],
     resolve: {
       alias: {

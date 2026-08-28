@@ -1,0 +1,6 @@
+{
+  "name": "Floating Night-Market: Moon-Koi Courier",
+  "description": "An atmospheric fantasy aerial exploration, trading, and courier game set in the Skybound Archipelago adrift above the storm.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

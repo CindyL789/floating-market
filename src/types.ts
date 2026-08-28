@@ -198,6 +198,12 @@ export interface PlayerStats {
   koiAffinity: number; // 0 - 100
 }
 
+export interface UpgradeLevels {
+  hull: number;
+  engine: number;
+  weapon: number;
+}
+
 export interface GameState {
   // Navigation & Location
   currentDistrict: DistrictId | null; // null if in sky_flight
@@ -210,7 +216,8 @@ export interface GameState {
   
   // Stats & Resources
   stats: PlayerStats;
-  droplets: number; // Moon-Luminescence Droplets
+  upgrades: UpgradeLevels;
+  droplets: number; // Moon-Luminescence Droplets / upgrade credits
   favors: number; // Brass Seals / Favors
   stormJars: number; // Weather jars
   reputation: {

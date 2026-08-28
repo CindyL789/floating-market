@@ -16,6 +16,7 @@ import { UndertowGameModal } from './components/UndertowGameModal';
 import { CharacterCreatorModal } from './components/CharacterCreatorModal';
 import { WorldMapModal } from './components/WorldMapModal';
 import { SkillTreeModal } from './components/SkillTreeModal';
+import { UpgradeShopModal } from './components/UpgradeShopModal';
 import { QuestDrawer } from './components/QuestDrawer';
 import { sound } from './utils/audio';
 
@@ -32,6 +33,20 @@ export default function App() {
       console.error('Failed to load saved character', e);
     }
 
+    let savedUpgrades = { hull: 0, engine: 0, weapon: 0 };
+    let savedHullIntegrity = 100;
+    try {
+      const storedProgress = localStorage.getItem('moon_koi_upgrade_progress');
+      if (storedProgress) {
+        const parsed = JSON.parse(storedProgress);
+        savedUpgrades = { ...savedUpgrades, ...(parsed.upgrades || {}) };
+        savedHullIntegrity = typeof parsed.hullIntegrity === 'number' ? parsed.hullIntegrity : savedHullIntegrity;
+      }
+    } catch (e) {
+      console.error('Failed to load saved upgrade progress', e);
+    }
+    const savedMaxHull = 100 + savedUpgrades.hull * 18;
+
     return {
       currentDistrict: 'lantern_bazaar',
       viewMode: 'district', // starts docked at Lantern Bazaar for immediate story immersion
@@ -43,13 +58,14 @@ export default function App() {
       mapWaypoint: null,
       unlockedSkills: [],
       stats: {
-        hullIntegrity: 100,
-        maxHull: 100,
-        speedLevel: 1,
+        hullIntegrity: Math.min(savedMaxHull, savedHullIntegrity),
+        maxHull: savedMaxHull,
+        speedLevel: 1 + savedUpgrades.engine,
         lanternPower: 100,
         maxLanternPower: 100,
         koiAffinity: 65
       },
+      upgrades: savedUpgrades,
       droplets: 80,
       favors: 3,
       stormJars: 1,
@@ -81,6 +97,13 @@ export default function App() {
     };
   });
 
+  useEffect(() => {
+    localStorage.setItem('moon_koi_upgrade_progress', JSON.stringify({
+      upgrades: gameState.upgrades,
+      hullIntegrity: gameState.stats.hullIntegrity,
+    }));
+  }, [gameState.upgrades, gameState.stats.hullIntegrity]);
+
   // Modal display states
   const [showWardrobe, setShowWardrobe] = useState(false);
   const [showCodex, setShowCodex] = useState(false);
@@ -88,6 +111,7 @@ export default function App() {
   const [showCharacterCreator, setShowCharacterCreator] = useState(false);
   const [showWorldMap, setShowWorldMap] = useState(false);
   const [showSkillTree, setShowSkillTree] = useState(false);
+  const [showUpgradeShop, setShowUpgradeShop] = useState(false);
 
   // Docking event from Sky Flight
   const handleDockDistrict = (districtId: DistrictId) => {
@@ -167,6 +191,7 @@ export default function App() {
         onOpenCharacterCreator={() => setShowCharacterCreator(true)}
         onOpenWorldMap={() => setShowWorldMap(true)}
         onOpenSkillTree={() => setShowSkillTree(true)}
+        onOpenUpgradeShop={() => setShowUpgradeShop(true)}
       />
 
       {/* Main Viewport */}
@@ -194,6 +219,15 @@ export default function App() {
         {/* Story Quest & Dispatch Objectives Drawer */}
         <QuestDrawer gameState={gameState} />
       </main>
+
+      {/* Permanent Skiff Upgrade Shop */}
+      {showUpgradeShop && (
+        <UpgradeShopModal
+          gameState={gameState}
+          setGameState={setGameState}
+          onClose={() => setShowUpgradeShop(false)}
+        />
+      )}
 
       {/* Astral Attunement & Skill Tree Modal */}
       {showSkillTree && (

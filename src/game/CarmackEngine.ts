@@ -202,6 +202,7 @@ export class CarmackEngine {
   private gliderCharges = 1;
   private grappleCharges = 1;
   private shockCharges = 2;
+  private weaponUpgradeLevel = 0;
   private shockPulseTimer = 0;
   private shockPulseHit = false;
   private koiSegments: Vec2[];
@@ -221,6 +222,8 @@ export class CarmackEngine {
     this.velocity = { ...state.playerVelocity };
     this.angle = state.playerAngle;
     this.lanternMode = state.lanternMode;
+    this.weaponUpgradeLevel = state.upgrades?.weapon || 0;
+    this.shockCharges += this.weaponUpgradeLevel;
     this.koiSegments = Array.from({ length: 11 }, (_, index) => ({
       x: this.pos.x - index * 10,
       y: this.pos.y + 14,
@@ -333,7 +336,13 @@ export class CarmackEngine {
 
     const gliderActive = this.gliderTimer > 0;
     if (gliderActive) this.gliderTimer = Math.max(0, this.gliderTimer - dt);
-    const accel = (rig?.id === 'standard_courier' ? 140 : 110) * (gliderActive ? 1.35 : 1);
+    const engineLevel = state.upgrades?.engine || 0;
+    const weaponLevel = state.upgrades?.weapon || 0;
+    if (weaponLevel > this.weaponUpgradeLevel) {
+      this.shockCharges += weaponLevel - this.weaponUpgradeLevel;
+      this.weaponUpgradeLevel = weaponLevel;
+    }
+    const accel = (rig?.id === 'standard_courier' ? 140 : 110) * (1 + engineLevel * 0.12) * (gliderActive ? 1.35 : 1);
     this.angle += turning * 2.8 * dt;
     this.velocity.x += Math.cos(this.angle) * thrust * accel * dt;
     this.velocity.y += Math.sin(this.angle) * thrust * accel * dt;
@@ -354,7 +363,7 @@ export class CarmackEngine {
     const hasAeroSails = (state.unlockedSkills || []).includes('sail_aerodynamics');
     const currentSpeed = Math.hypot(this.velocity.x, this.velocity.y);
     const baseMaxSpeed = wind ? 320 : (keys[' '] || keys.space ? 260 : 190);
-    const maxSpeed = baseMaxSpeed * (hasAeroSails ? 1.25 : 1) * (gliderActive ? 1.45 : 1);
+    const maxSpeed = baseMaxSpeed * (hasAeroSails ? 1.25 : 1) * (1 + engineLevel * 0.04) * (gliderActive ? 1.45 : 1);
     if (currentSpeed > maxSpeed) {
       this.velocity.x = (this.velocity.x / currentSpeed) * maxSpeed;
       this.velocity.y = (this.velocity.y / currentSpeed) * maxSpeed;
@@ -526,6 +535,9 @@ export class CarmackEngine {
   private fireShockPulse(): void {
     if (this.shockCharges <= 0) return;
     this.shockCharges -= 1;
+    const weaponLevel = this.getState().upgrades?.weapon || 0;
+    const pulseRange = 310 + weaponLevel * 55;
+    const pulseCone = 160 + weaponLevel * 18;
     this.shockPulseTimer = 0.5;
     this.shockPulseHit = false;
     sound.playShockPulse();
@@ -537,7 +549,8 @@ export class CarmackEngine {
       const dx = enemy.x - this.pos.x;
       const dy = enemy.y - this.pos.y;
       const forwardDistance = dx * Math.cos(this.angle) + dy * Math.sin(this.angle);
-      if (enemyDistance < 310 && forwardDistance > 0) {
+      const lateralDistance = Math.abs(dx * -Math.sin(this.angle) + dy * Math.cos(this.angle));
+      if (enemyDistance < pulseRange && forwardDistance > 0 && lateralDistance < pulseCone) {
         enemy.health = 0;
         defeated += 1;
       }
@@ -576,6 +589,8 @@ export class CarmackEngine {
 
   private updateEnemies(dt: number, state: GameState): void {
     const protectedByLantern = this.lanternMode === 'ward' || state.activeRig === 'storm_run';
+    const hullLevel = state.upgrades?.hull || 0;
+    const incomingDamage = Math.max(2, Math.round(8 * (1 - hullLevel * 0.08)));
     for (const enemy of this.enemies) {
       if (enemy.health <= 0) continue;
       enemy.phase += dt;
@@ -590,7 +605,7 @@ export class CarmackEngine {
           sound.playEnemyPulse();
           this.updateState(previous => ({
             ...previous,
-            stats: { ...previous.stats, hullIntegrity: Math.max(0, previous.stats.hullIntegrity - 8) },
+            stats: { ...previous.stats, hullIntegrity: Math.max(0, previous.stats.hullIntegrity - incomingDamage) },
             logMessages: [{ id: Date.now().toString(), text: 'Raider skiff pulse hit the hull. Use X to fire a shock pulse.', time: 'Just now', type: 'hazard' }, ...previous.logMessages],
           }));
         }
@@ -628,12 +643,14 @@ export class CarmackEngine {
     }
     this.stormDamageTimer += dt;
     const isProtected = this.lanternMode === 'ward' || state.activeRig === 'storm_run';
+    const hullLevel = state.upgrades?.hull || 0;
+    const stormDamage = Math.max(1, Math.round(5 * (1 - hullLevel * 0.08)));
     if (this.stormDamageTimer > 1.8 && !isProtected) {
       this.stormDamageTimer = 0;
       sound.playThunderRumble();
       this.updateState(previous => ({
         ...previous,
-        stats: { ...previous.stats, hullIntegrity: Math.max(0, previous.stats.hullIntegrity - 5) },
+        stats: { ...previous.stats, hullIntegrity: Math.max(0, previous.stats.hullIntegrity - stormDamage) },
         logMessages: [{
           id: Date.now().toString(),
           text: 'Storm surge rattles the skiff hull. Switch to WARD or equip Storm-Run.',

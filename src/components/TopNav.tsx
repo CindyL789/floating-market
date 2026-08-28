@@ -15,7 +15,8 @@ import {
   Wind,
   Compass,
   Map as MapIcon,
-  User
+  User,
+  Hammer
 } from 'lucide-react';
 
 interface Props {
@@ -26,6 +27,7 @@ interface Props {
   onOpenCharacterCreator: () => void;
   onOpenWorldMap: () => void;
   onOpenSkillTree: () => void;
+  onOpenUpgradeShop: () => void;
 }
 
 export const TopNav: React.FC<Props> = ({
@@ -36,6 +38,7 @@ export const TopNav: React.FC<Props> = ({
   onOpenCharacterCreator,
   onOpenWorldMap,
   onOpenSkillTree,
+  onOpenUpgradeShop,
 }) => {
   const toggleSound = () => {
     const next = !gameState.soundEnabled;
@@ -146,6 +149,17 @@ export const TopNav: React.FC<Props> = ({
         >
           <Compass className="w-3.5 h-3.5 text-sky-400 animate-spin-slow" />
           <span>World Chart</span>
+        </button>
+
+        {/* Permanent Upgrade Bay */}
+        <button
+          id="btn-nav-upgrade-shop"
+          onClick={onOpenUpgradeShop}
+          className="relative px-3 py-1.5 rounded-xl bg-gradient-to-r from-teal-500/25 to-amber-500/25 hover:from-teal-500/40 hover:to-amber-500/40 border border-teal-400/45 text-xs font-bold text-teal-100 flex items-center gap-1.5 transition-all shadow-sm shadow-teal-950"
+          title="Open permanent hull, engine, and weapon upgrades"
+        >
+          <Hammer className="w-3.5 h-3.5 text-teal-300" />
+          <span className="hidden xl:inline">Upgrade Bay</span>
         </button>
 
         {/* Character Creator / Gear Rig Button */}

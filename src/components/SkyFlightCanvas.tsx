@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { Anchor, Compass, Gauge, Navigation, Shield, Sparkles, Wind, Zap } from 'lucide-react';
-import { CarmackEngine, FlightTelemetry } from '../game/CarmackEngine';
+import { CarmackEngine, FlightTelemetry, RadarBlip } from '../game/CarmackEngine';
 import { DistrictId, GameState, LanternMode } from '../types';
 
 interface Props {
@@ -17,6 +17,10 @@ const DEFAULT_TELEMETRY: FlightTelemetry = {
   inStorm: false,
   waypointDistance: null,
   lanternMode: 'beacon',
+  playerX: 0,
+  playerY: 0,
+  playerAngle: 0,
+  radarBlips: [],
 };
 
 const lanternModes: { id: LanternMode; label: string; key: string; icon: React.ReactNode }[] = [
@@ -97,6 +101,8 @@ export const SkyFlightCanvas: React.FC<Props> = ({ gameState, setGameState, onDo
   return (
     <section className="relative h-full w-full overflow-hidden bg-[#030712]" aria-label="Skyways flight deck">
       <canvas ref={canvasRef} className="absolute inset-0 h-full w-full touch-none" />
+
+      <MiniRadar telemetry={telemetry} waypoint={gameState.mapWaypoint} />
 
       <div className="pointer-events-none absolute inset-0 flex flex-col justify-between p-4 sm:p-6">
         <div className="flex items-start justify-between gap-4">
@@ -191,6 +197,30 @@ export const SkyFlightCanvas: React.FC<Props> = ({ gameState, setGameState, onDo
         </div>
       )}
     </section>
+  );
+};
+
+const MiniRadar = ({ telemetry, waypoint }: { telemetry: FlightTelemetry; waypoint: GameState['mapWaypoint'] }) => {
+  const toPercentX = (value: number) => Math.max(3, Math.min(97, value / 1800 * 100));
+  const toPercentY = (value: number) => Math.max(4, Math.min(96, value / 1600 * 100));
+  const blips = telemetry.radarBlips.filter((blip) => blip.x >= 0 && blip.y >= 0);
+  const visibleBlips = blips.filter((blip) => blip.type !== 'landmark' || Math.hypot(blip.x - telemetry.playerX, blip.y - telemetry.playerY) < 850);
+
+  return (
+    <div className="pointer-events-none absolute right-4 top-24 z-10 hidden w-40 rounded border border-cyan-300/30 bg-[#030b18]/80 p-2 font-mono shadow-[0_0_24px_rgba(34,211,238,0.12)] backdrop-blur-sm sm:block sm:right-6 sm:top-28">
+      <div className="mb-1.5 flex items-center justify-between text-[9px] font-bold tracking-[0.18em] text-cyan-200"><span>RADAR // SKYWAYS</span><span className="text-cyan-400/70">LIVE</span></div>
+      <div className="relative h-28 overflow-hidden rounded border border-cyan-300/20 bg-[#061728]">
+        <div className="absolute inset-0 opacity-40" style={{ backgroundImage: 'linear-gradient(rgba(56,189,248,.16) 1px, transparent 1px), linear-gradient(90deg, rgba(56,189,248,.16) 1px, transparent 1px)', backgroundSize: '20% 20%' }} />
+        <div className="absolute left-1/2 top-1/2 h-16 w-16 -translate-x-1/2 -translate-y-1/2 rounded-full border border-cyan-300/15" />
+        <div className="absolute left-1/2 top-1/2 h-9 w-9 -translate-x-1/2 -translate-y-1/2 rounded-full border border-cyan-300/15" />
+        {visibleBlips.map((blip: RadarBlip) => (
+          <span key={blip.id} title={blip.id} className={`absolute block -translate-x-1/2 -translate-y-1/2 ${blip.type === 'storm' ? 'h-2.5 w-2.5 rounded-full border border-violet-200 bg-violet-400/70 shadow-[0_0_10px_#8b5cf6]' : blip.type === 'district' ? 'h-2 w-2 rotate-45 border border-amber-100 bg-amber-300 shadow-[0_0_9px_#f59e0b]' : blip.type === 'collectible' ? 'h-1.5 w-1.5 rounded-full bg-cyan-300 shadow-[0_0_8px_#38bdf8]' : 'h-1 w-1 rounded-full bg-fuchsia-300'}`} style={{ left: `${toPercentX(blip.x)}%`, top: `${toPercentY(blip.y)}%`, backgroundColor: blip.type === 'storm' || blip.type === 'district' || blip.type === 'collectible' ? undefined : blip.accent }} />
+        ))}
+        {waypoint && <span className="absolute block h-2 w-2 animate-pulse rounded-full border border-white bg-cyan-300 shadow-[0_0_10px_#fff]" style={{ left: `${toPercentX(waypoint.x)}%`, top: `${toPercentY(waypoint.y)}%` }} />}
+        <span className="absolute z-10 -translate-x-1/2 -translate-y-1/2 text-cyan-100 drop-shadow-[0_0_6px_#22d3ee]" style={{ left: `${toPercentX(telemetry.playerX)}%`, top: `${toPercentY(telemetry.playerY)}%`, transform: `translate(-50%, -50%) rotate(${telemetry.playerAngle * 180 / Math.PI + 90}deg)` }}><Navigation size={14} fill="currentColor" /></span>
+      </div>
+      <div className="mt-1.5 flex items-center justify-between text-[8px] tracking-[0.12em] text-slate-500"><span><i className="mr-1 inline-block h-1.5 w-1.5 rotate-45 bg-amber-300" />DOCKS</span><span><i className="mr-1 inline-block h-1.5 w-1.5 rounded-full bg-violet-400" />STORMS</span><span>{Math.round(telemetry.playerX)},{Math.round(telemetry.playerY)}</span></div>
+    </div>
   );
 };
 

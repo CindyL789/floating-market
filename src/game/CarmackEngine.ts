@@ -4,6 +4,14 @@ import { sound } from '../utils/audio';
 
 export type GameStateUpdater = (updater: (previous: GameState) => GameState) => void;
 
+export interface RadarBlip {
+  id: string;
+  x: number;
+  y: number;
+  type: 'district' | 'landmark' | 'collectible' | 'storm';
+  accent: string;
+}
+
 export interface FlightTelemetry {
   speed: number;
   nearbyDistrict: DistrictId | null;
@@ -12,6 +20,10 @@ export interface FlightTelemetry {
   inStorm: boolean;
   waypointDistance: number | null;
   lanternMode: LanternMode;
+  playerX: number;
+  playerY: number;
+  playerAngle: number;
+  radarBlips: RadarBlip[];
 }
 
 export interface CarmackEngineOptions {
@@ -115,6 +127,7 @@ export class CarmackEngine {
   private horizon = 0;
   private disposed = false;
   private telemetryTimer = 0;
+  private spatialAudioTimer = 0;
   private stormDamageTimer = 0;
   private lastCollectedAt = 0;
 
@@ -169,6 +182,7 @@ export class CarmackEngine {
     window.removeEventListener('resize', this.handleResize);
     window.removeEventListener('keydown', this.handleKeyDown);
     window.removeEventListener('keyup', this.handleKeyUp);
+    sound.disposeFlightSpatialAudio();
     this.updateState(previous => ({
       ...previous,
       playerPos: { ...this.pos },
@@ -281,6 +295,7 @@ export class CarmackEngine {
     this.updateKoi(dt, time);
     this.updateCollectibles(dt, time, state);
     this.updateStorm(dt, state);
+    this.updateSpatialAudio(dt);
 
     this.telemetryTimer += dt;
     if (this.telemetryTimer > 0.12) {
@@ -416,6 +431,43 @@ export class CarmackEngine {
     }
   }
 
+  private updateSpatialAudio(dt: number): void {
+    this.spatialAudioTimer += dt;
+    if (this.spatialAudioTimer < 0.08) return;
+    this.spatialAudioTimer = 0;
+
+    const wind = this.currentWind();
+    let windIntensity = 0;
+    let pan = 0;
+    if (wind) {
+      windIntensity = clamp(wind.speed / 2.5, 0.35, 1);
+      const windX = wind.x2 - wind.x1;
+      const windY = wind.y2 - wind.y1;
+      const windLength = Math.hypot(windX, windY) || 1;
+      const rightX = -Math.sin(this.angle);
+      const rightY = Math.cos(this.angle);
+      pan = clamp(((windX / windLength) * rightX + (windY / windLength) * rightY) * 1.3, -1, 1);
+    }
+
+    let stormIntensity = 0;
+    let stormPan = pan;
+    let nearestStormDistance = Infinity;
+    for (const zone of STORM_ZONES) {
+      const dx = zone.x - this.pos.x;
+      const dy = zone.y - this.pos.y;
+      const currentDistance = Math.hypot(dx, dy);
+      if (currentDistance < nearestStormDistance) {
+        nearestStormDistance = currentDistance;
+        const rightX = -Math.sin(this.angle);
+        const rightY = Math.cos(this.angle);
+        stormPan = clamp(((dx * rightX + dy * rightY) / Math.max(zone.radius * 1.6, 1)), -1, 1);
+      }
+      stormIntensity = Math.max(stormIntensity, clamp(1 - currentDistance / (zone.radius * 1.6), 0, 1));
+    }
+
+    sound.updateFlightSpatialAudio(windIntensity, stormIntensity, stormIntensity > 0.05 ? stormPan : pan);
+  }
+
   private telemetry(): FlightTelemetry {
     let nearbyDistrict: DistrictId | null = null;
     let nearbyDistance = Infinity;
@@ -437,6 +489,15 @@ export class CarmackEngine {
       inStorm: STORM_ZONES.some(zone => distance(this.pos, zone) < zone.radius),
       waypointDistance: waypoint ? Math.round(distance(this.pos, waypoint)) : null,
       lanternMode: this.lanternMode,
+      playerX: this.pos.x,
+      playerY: this.pos.y,
+      playerAngle: this.angle,
+      radarBlips: [
+        ...(Object.values(DISTRICTS).map(district => ({ id: district.id, x: district.coordinates.x, y: district.coordinates.y, type: 'district' as const, accent: district.accentColor }))),
+        ...(LANDMARKS.filter(landmark => !landmark.districtId).map(landmark => ({ id: landmark.id, x: landmark.coordinates.x, y: landmark.coordinates.y, type: 'landmark' as const, accent: landmark.type === 'hazard_zone' ? '#f43f5e' : '#c084fc' }))),
+        ...(this.collectibles.map(item => ({ id: item.id, x: item.x, y: item.y, type: 'collectible' as const, accent: item.type === 'salvage' ? '#f59e0b' : item.type === 'storm_charge' ? '#a78bfa' : '#38bdf8' }))),
+        ...(STORM_ZONES.map((zone, index) => ({ id: `storm-${index}`, x: zone.x, y: zone.y, type: 'storm' as const, accent: '#818cf8' }))),
+      ],
     };
   }
 
@@ -635,8 +696,20 @@ export class CarmackEngine {
     ctx.ellipse(projected.x, baseY + 5, width * 0.64, Math.max(3, width * 0.13), 0, 0, Math.PI * 2);
     ctx.fill();
 
+    this.drawMarketFacade(projected.x - width * 0.33, baseY - height * 0.12, width * 0.34, height * 0.44, accent, -1, time);
+    this.drawMarketFacade(projected.x + width * 0.33, baseY - height * 0.12, width * 0.34, height * 0.44, accent, 1, time + 0.7);
+
     ctx.fillStyle = '#172a3b';
     ctx.fillRect(projected.x - width * 0.55, baseY - Math.max(3, height * 0.12), width * 1.1, Math.max(4, height * 0.12));
+    ctx.strokeStyle = '#8d713e';
+    ctx.lineWidth = Math.max(1, height * 0.018);
+    for (let plank = -4; plank <= 4; plank += 1) {
+      const plankX = projected.x + plank * width * 0.11;
+      ctx.beginPath();
+      ctx.moveTo(plankX, baseY - height * 0.115);
+      ctx.lineTo(plankX + width * 0.025, baseY - height * 0.02);
+      ctx.stroke();
+    }
     ctx.strokeStyle = accent;
     ctx.globalAlpha *= 0.8;
     ctx.strokeRect(projected.x - width * 0.55, baseY - Math.max(3, height * 0.12), width * 1.1, Math.max(4, height * 0.12));
@@ -692,6 +765,84 @@ export class CarmackEngine {
     ctx.globalAlpha = 1;
     ctx.fillStyle = '#101827';
     ctx.fillRect(x - width * 0.7, baseY - height * 0.1, width * 1.4, Math.max(2, height * 0.1));
+    ctx.strokeStyle = 'rgba(220, 191, 123, 0.7)';
+    ctx.lineWidth = Math.max(1, width * 0.035);
+    for (let band = 1; band < 5; band += 1) {
+      const bandY = baseY - height * (band / 5);
+      ctx.beginPath();
+      ctx.moveTo(x - width * 0.46, bandY);
+      ctx.lineTo(x + width * 0.46, bandY);
+      ctx.stroke();
+    }
+  }
+
+  private drawMarketFacade(x: number, baseY: number, width: number, height: number, accent: string, side: -1 | 1, time: number): void {
+    const ctx = this.ctx;
+    const left = x - width / 2;
+    const top = baseY - height;
+    const wallGradient = ctx.createLinearGradient(left, top, left + width, baseY);
+    wallGradient.addColorStop(0, '#0c1829');
+    wallGradient.addColorStop(0.5, '#27384b');
+    wallGradient.addColorStop(1, '#101b2b');
+    ctx.fillStyle = wallGradient;
+    ctx.fillRect(left, top, width, height);
+    ctx.strokeStyle = '#9b7845';
+    ctx.lineWidth = Math.max(1, width * 0.045);
+    ctx.strokeRect(left, top, width, height);
+
+    ctx.strokeStyle = 'rgba(196, 158, 91, 0.38)';
+    ctx.lineWidth = Math.max(1, width * 0.015);
+    for (let row = 1; row < 5; row += 1) {
+      const rowY = top + row * height / 5;
+      ctx.beginPath();
+      ctx.moveTo(left, rowY);
+      ctx.lineTo(left + width, rowY);
+      ctx.stroke();
+    }
+    for (let column = 1; column < 4; column += 1) {
+      const columnX = left + column * width / 4;
+      ctx.beginPath();
+      ctx.moveTo(columnX, top);
+      ctx.lineTo(columnX, baseY);
+      ctx.stroke();
+    }
+
+    const windowSize = Math.max(2, width * 0.13);
+    for (let window = 0; window < 4; window += 1) {
+      const windowX = left + width * (0.17 + (window % 2) * 0.56);
+      const windowY = top + height * (0.23 + Math.floor(window / 2) * 0.38);
+      ctx.fillStyle = window % 3 === 0 ? '#ffd58a' : '#ff9d4a';
+      ctx.globalAlpha = 0.68 + 0.22 * Math.sin(time * 0.003 + window);
+      ctx.shadowBlur = Math.min(14, width * 0.12);
+      ctx.shadowColor = '#ff9d4a';
+      ctx.fillRect(windowX - windowSize / 2, windowY - windowSize / 2, windowSize, windowSize * 0.72);
+      ctx.shadowBlur = 0;
+    }
+    ctx.globalAlpha = 1;
+
+    const roofOverhang = width * 0.14;
+    ctx.fillStyle = side < 0 ? '#124f5b' : '#155060';
+    ctx.beginPath();
+    ctx.moveTo(left - roofOverhang, top + height * 0.08);
+    ctx.lineTo(left + width / 2, top - height * 0.28);
+    ctx.lineTo(left + width + roofOverhang, top + height * 0.08);
+    ctx.closePath();
+    ctx.fill();
+    ctx.strokeStyle = accent;
+    ctx.lineWidth = Math.max(1, width * 0.025);
+    ctx.stroke();
+
+    ctx.fillStyle = '#c27639';
+    ctx.fillRect(left + width * 0.07, top - height * 0.4, Math.max(2, width * 0.04), height * 0.4);
+    ctx.fillStyle = accent;
+    ctx.globalAlpha = 0.86;
+    ctx.beginPath();
+    ctx.moveTo(left + width * 0.09, top - height * 0.36);
+    ctx.lineTo(left + width * 0.37, top - height * 0.28);
+    ctx.lineTo(left + width * 0.09, top - height * 0.16);
+    ctx.closePath();
+    ctx.fill();
+    ctx.globalAlpha = 1;
   }
 
   private renderLandmark(point: Vec2, type: string, projected: ProjectedPoint, time: number): void {

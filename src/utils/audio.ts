@@ -7,6 +7,12 @@ class SoundEngine {
   private windOsc: OscillatorNode | null = null;
   private windFilter: BiquadFilterNode | null = null;
   private isAmbientRunning: boolean = false;
+  private flightWindOscillator: OscillatorNode | null = null;
+  private flightStormOscillator: OscillatorNode | null = null;
+  private flightWindGain: GainNode | null = null;
+  private flightStormGain: GainNode | null = null;
+  private flightWindPanner: StereoPannerNode | null = null;
+  private flightStormPanner: StereoPannerNode | null = null;
 
   private initContext() {
     if (!this.ctx) {
@@ -72,6 +78,66 @@ class SoundEngine {
     } catch {
       // Audio context may require user gesture
     }
+  }
+
+  // Update directional flight audio. Values are normalized in the renderer.
+  public updateFlightSpatialAudio(windIntensity: number, stormIntensity: number, pan: number) {
+    if (this.isMuted) return;
+    try {
+      this.initContext();
+      if (!this.ctx || !this.masterGain) return;
+      if (!this.flightWindOscillator || !this.flightStormOscillator || !this.flightWindGain || !this.flightStormGain || !this.flightWindPanner || !this.flightStormPanner) {
+        this.flightWindOscillator = this.ctx.createOscillator();
+        this.flightWindOscillator.type = 'triangle';
+        this.flightWindOscillator.frequency.setValueAtTime(118, this.ctx.currentTime);
+        this.flightWindGain = this.ctx.createGain();
+        this.flightWindGain.gain.setValueAtTime(0.001, this.ctx.currentTime);
+        this.flightWindPanner = this.ctx.createStereoPanner();
+        this.flightWindOscillator.connect(this.flightWindGain).connect(this.flightWindPanner).connect(this.masterGain);
+        this.flightWindOscillator.start();
+
+        this.flightStormOscillator = this.ctx.createOscillator();
+        this.flightStormOscillator.type = 'sawtooth';
+        this.flightStormOscillator.frequency.setValueAtTime(46, this.ctx.currentTime);
+        this.flightStormGain = this.ctx.createGain();
+        this.flightStormGain.gain.setValueAtTime(0.001, this.ctx.currentTime);
+        this.flightStormPanner = this.ctx.createStereoPanner();
+        this.flightStormOscillator.connect(this.flightStormGain).connect(this.flightStormPanner).connect(this.masterGain);
+        this.flightStormOscillator.start();
+      }
+
+      const now = this.ctx.currentTime;
+      const safePan = Math.max(-1, Math.min(1, pan));
+      this.flightWindPanner.pan.setTargetAtTime(safePan, now, 0.08);
+      this.flightStormPanner.pan.setTargetAtTime(-safePan * 0.85, now, 0.08);
+      this.flightWindGain.gain.setTargetAtTime(0.012 + windIntensity * 0.055, now, 0.12);
+      this.flightStormGain.gain.setTargetAtTime(stormIntensity * 0.11, now, 0.16);
+      this.flightWindOscillator.frequency.setTargetAtTime(108 + windIntensity * 52, now, 0.14);
+      this.flightStormOscillator.frequency.setTargetAtTime(42 + stormIntensity * 24, now, 0.18);
+    } catch {
+      // Spatial audio is an enhancement; browsers may block it before a gesture.
+    }
+  }
+
+  public disposeFlightSpatialAudio() {
+    try {
+      this.flightWindOscillator?.stop();
+      this.flightStormOscillator?.stop();
+    } catch {
+      // Oscillators may already be stopped.
+    }
+    this.flightWindOscillator?.disconnect();
+    this.flightStormOscillator?.disconnect();
+    this.flightWindGain?.disconnect();
+    this.flightStormGain?.disconnect();
+    this.flightWindPanner?.disconnect();
+    this.flightStormPanner?.disconnect();
+    this.flightWindOscillator = null;
+    this.flightStormOscillator = null;
+    this.flightWindGain = null;
+    this.flightStormGain = null;
+    this.flightWindPanner = null;
+    this.flightStormPanner = null;
   }
 
   // Play a shimmering moon-koi chime (pentatonic scale)

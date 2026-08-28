@@ -819,6 +819,47 @@ export class CarmackEngine {
       ctx.fill();
     }
     ctx.restore();
+    this.renderDistantSkyline(time);
+  }
+
+  private renderDistantSkyline(time: number): void {
+    const ctx = this.ctx;
+    const skylineY = this.horizon - 54;
+    ctx.save();
+    ctx.globalAlpha = 0.72;
+    for (let index = 0; index < 8; index += 1) {
+      const drift = ((time * (0.006 + (index % 3) * 0.001) + index * 178) % (this.width + 300)) - 150;
+      const width = 58 + (index % 3) * 24;
+      const height = 28 + (index % 4) * 14;
+      const baseY = skylineY - (index % 3) * 18;
+      const hue = index % 2 === 0 ? '#163652' : '#1a2c48';
+      ctx.fillStyle = hue;
+      ctx.fillRect(drift - width / 2, baseY - height, width, height);
+      ctx.strokeStyle = index % 2 === 0 ? 'rgba(65, 204, 223, 0.62)' : 'rgba(192, 139, 65, 0.55)';
+      ctx.lineWidth = Math.max(1, this.width / 1400);
+      ctx.strokeRect(drift - width / 2, baseY - height, width, height);
+      ctx.fillStyle = index % 2 === 0 ? '#14596b' : '#493a3a';
+      ctx.beginPath();
+      ctx.moveTo(drift - width * 0.62, baseY - height);
+      ctx.lineTo(drift, baseY - height - height * 0.52);
+      ctx.lineTo(drift + width * 0.62, baseY - height);
+      ctx.closePath();
+      ctx.fill();
+      ctx.fillStyle = index % 3 === 0 ? '#ffb45c' : '#5de8ea';
+      for (let window = 0; window < 3; window += 1) {
+        ctx.globalAlpha = 0.35 + 0.12 * Math.sin(time * 0.002 + index + window);
+        ctx.fillRect(drift - width * 0.3 + window * width * 0.28, baseY - height * 0.62, Math.max(2, width * 0.08), Math.max(2, height * 0.16));
+      }
+      ctx.globalAlpha = 0.72;
+      ctx.fillStyle = '#071522';
+      ctx.fillRect(drift - width * 0.72, baseY + 2, width * 1.44, 3);
+      ctx.strokeStyle = 'rgba(61, 209, 232, 0.32)';
+      ctx.beginPath();
+      ctx.moveTo(drift - width * 0.72, baseY + 5);
+      ctx.lineTo(drift + width * 0.72, baseY + 5);
+      ctx.stroke();
+    }
+    ctx.restore();
   }
 
   private renderCloudFloor(time: number): void {
@@ -956,8 +997,8 @@ export class CarmackEngine {
     ctx.ellipse(projected.x, baseY + 5, width * 0.64, Math.max(3, width * 0.13), 0, 0, Math.PI * 2);
     ctx.fill();
 
-    this.drawMarketFacade(projected.x - width * 0.33, baseY - height * 0.12, width * 0.34, height * 0.44, accent, -1, time);
-    this.drawMarketFacade(projected.x + width * 0.33, baseY - height * 0.12, width * 0.34, height * 0.44, accent, 1, time + 0.7);
+    this.drawMarketFacade(projected.x - width * 0.35, baseY - height * 0.08, width * 0.42, height * 0.58, accent, -1, time);
+    this.drawMarketFacade(projected.x + width * 0.35, baseY - height * 0.08, width * 0.42, height * 0.58, accent, 1, time + 0.7);
 
     ctx.fillStyle = '#172a3b';
     ctx.fillRect(projected.x - width * 0.55, baseY - Math.max(3, height * 0.12), width * 1.1, Math.max(4, height * 0.12));
@@ -1039,24 +1080,30 @@ export class CarmackEngine {
   private drawMarketFacade(x: number, baseY: number, width: number, height: number, accent: string, side: -1 | 1, time: number): void {
     const ctx = this.ctx;
     const left = x - width / 2;
+    const right = x + width / 2;
     const top = baseY - height;
-    const wallGradient = ctx.createLinearGradient(left, top, left + width, baseY);
-    wallGradient.addColorStop(0, '#0c1829');
-    wallGradient.addColorStop(0.5, '#27384b');
-    wallGradient.addColorStop(1, '#101b2b');
+    const wallGradient = ctx.createLinearGradient(left, top, right, baseY);
+    wallGradient.addColorStop(0, '#0a1828');
+    wallGradient.addColorStop(0.32, '#31485b');
+    wallGradient.addColorStop(0.52, '#1b2f43');
+    wallGradient.addColorStop(1, '#0a1424');
+
+    ctx.save();
+    ctx.fillStyle = 'rgba(1, 8, 18, 0.9)';
+    ctx.fillRect(left - width * 0.16, baseY - height * 0.05, width * 1.32, Math.max(2, height * 0.08));
     ctx.fillStyle = wallGradient;
     ctx.fillRect(left, top, width, height);
-    ctx.strokeStyle = '#9b7845';
-    ctx.lineWidth = Math.max(1, width * 0.045);
+    ctx.strokeStyle = '#b18a4e';
+    ctx.lineWidth = Math.max(1, width * 0.035);
     ctx.strokeRect(left, top, width, height);
 
-    ctx.strokeStyle = 'rgba(196, 158, 91, 0.38)';
-    ctx.lineWidth = Math.max(1, width * 0.015);
-    for (let row = 1; row < 5; row += 1) {
-      const rowY = top + row * height / 5;
+    ctx.strokeStyle = 'rgba(215, 183, 111, 0.3)';
+    ctx.lineWidth = Math.max(1, width * 0.012);
+    for (let row = 1; row < 7; row += 1) {
+      const rowY = top + row * height / 7;
       ctx.beginPath();
       ctx.moveTo(left, rowY);
-      ctx.lineTo(left + width, rowY);
+      ctx.lineTo(right, rowY);
       ctx.stroke();
     }
     for (let column = 1; column < 4; column += 1) {
@@ -1067,42 +1114,96 @@ export class CarmackEngine {
       ctx.stroke();
     }
 
-    const windowSize = Math.max(2, width * 0.13);
-    for (let window = 0; window < 4; window += 1) {
-      const windowX = left + width * (0.17 + (window % 2) * 0.56);
-      const windowY = top + height * (0.23 + Math.floor(window / 2) * 0.38);
-      ctx.fillStyle = window % 3 === 0 ? '#ffd58a' : '#ff9d4a';
-      ctx.globalAlpha = 0.68 + 0.22 * Math.sin(time * 0.003 + window);
-      ctx.shadowBlur = Math.min(14, width * 0.12);
-      ctx.shadowColor = '#ff9d4a';
-      ctx.fillRect(windowX - windowSize / 2, windowY - windowSize / 2, windowSize, windowSize * 0.72);
+    ctx.strokeStyle = '#c59a56';
+    ctx.lineWidth = Math.max(1, width * 0.045);
+    for (const beamX of [left + width * 0.08, x, right - width * 0.08]) {
+      ctx.beginPath();
+      ctx.moveTo(beamX, top);
+      ctx.lineTo(beamX, baseY);
+      ctx.stroke();
+    }
+
+    const windowWidth = Math.max(3, width * 0.13);
+    const windowHeight = Math.max(3, height * 0.085);
+    for (let row = 0; row < 3; row += 1) {
+      for (let column = 0; column < 2; column += 1) {
+        const windowX = left + width * (0.22 + column * 0.56);
+        const windowY = top + height * (0.2 + row * 0.22);
+        const flicker = 0.62 + 0.25 * Math.sin(time * 0.003 + row * 1.7 + column);
+        ctx.globalAlpha = flicker;
+        ctx.fillStyle = (row + column) % 3 === 0 ? '#ffe2a0' : '#ff9f4a';
+        ctx.shadowBlur = Math.min(18, width * 0.12);
+        ctx.shadowColor = '#ff9f4a';
+        ctx.fillRect(windowX - windowWidth / 2, windowY - windowHeight / 2, windowWidth, windowHeight);
+        ctx.shadowBlur = 0;
+        ctx.globalAlpha = 1;
+        ctx.strokeStyle = 'rgba(11, 21, 35, 0.8)';
+        ctx.lineWidth = Math.max(1, width * 0.012);
+        ctx.beginPath();
+        ctx.moveTo(windowX, windowY - windowHeight / 2);
+        ctx.lineTo(windowX, windowY + windowHeight / 2);
+        ctx.stroke();
+      }
+    }
+
+    const doorWidth = Math.max(4, width * 0.19);
+    const doorHeight = height * 0.22;
+    ctx.fillStyle = '#091321';
+    ctx.fillRect(x - doorWidth / 2, baseY - doorHeight, doorWidth, doorHeight);
+    ctx.strokeStyle = accent;
+    ctx.lineWidth = Math.max(1, width * 0.018);
+    ctx.strokeRect(x - doorWidth / 2, baseY - doorHeight, doorWidth, doorHeight);
+    ctx.fillStyle = '#f6b45b';
+    ctx.globalAlpha = 0.7 + 0.2 * Math.sin(time * 0.004 + side);
+    ctx.fillRect(x - doorWidth * 0.25, baseY - doorHeight * 0.65, doorWidth * 0.5, doorHeight * 0.24);
+    ctx.globalAlpha = 1;
+
+    for (let layer = 0; layer < 3; layer += 1) {
+      const eaveY = top - height * (0.03 + layer * 0.13);
+      const peakY = eaveY - height * (0.16 - layer * 0.018);
+      const overhang = width * (0.13 + layer * 0.045);
+      ctx.fillStyle = layer === 0 ? (side < 0 ? '#17606b' : '#1b6670') : layer === 1 ? '#164b5f' : '#203c58';
+      ctx.beginPath();
+      ctx.moveTo(left - overhang, eaveY + height * 0.035);
+      ctx.quadraticCurveTo(x, peakY, right + overhang, eaveY + height * 0.035);
+      ctx.lineTo(right + overhang * 0.82, eaveY + height * 0.085);
+      ctx.quadraticCurveTo(x, peakY + height * 0.07, left - overhang * 0.82, eaveY + height * 0.085);
+      ctx.closePath();
+      ctx.fill();
+      ctx.strokeStyle = layer === 0 ? accent : 'rgba(188, 151, 83, 0.7)';
+      ctx.lineWidth = Math.max(1, width * (layer === 0 ? 0.022 : 0.014));
+      ctx.stroke();
+    }
+
+    ctx.fillStyle = '#d0994d';
+    ctx.fillRect(x - Math.max(1, width * 0.018), top - height * 0.48, Math.max(2, width * 0.036), height * 0.34);
+    ctx.fillStyle = accent;
+    ctx.globalAlpha = 0.9;
+    ctx.beginPath();
+    ctx.moveTo(x, top - height * 0.46);
+    ctx.lineTo(x + side * width * 0.2, top - height * 0.38);
+    ctx.lineTo(x, top - height * 0.28);
+    ctx.closePath();
+    ctx.fill();
+    ctx.globalAlpha = 1;
+
+    for (let lantern = 0; lantern < 2; lantern += 1) {
+      const lanternX = left + width * (0.2 + lantern * 0.6);
+      const lanternY = top - height * 0.04;
+      const lanternSize = Math.max(2, width * 0.04);
+      ctx.strokeStyle = '#9d713a';
+      ctx.lineWidth = Math.max(1, width * 0.012);
+      ctx.beginPath();
+      ctx.moveTo(lanternX, lanternY - height * 0.09);
+      ctx.lineTo(lanternX, lanternY);
+      ctx.stroke();
+      ctx.fillStyle = '#ff9a43';
+      ctx.shadowBlur = Math.min(16, lanternSize * 3);
+      ctx.shadowColor = '#ff8d28';
+      ctx.fillRect(lanternX - lanternSize, lanternY, lanternSize * 2, lanternSize * 2.6);
       ctx.shadowBlur = 0;
     }
-    ctx.globalAlpha = 1;
-
-    const roofOverhang = width * 0.14;
-    ctx.fillStyle = side < 0 ? '#124f5b' : '#155060';
-    ctx.beginPath();
-    ctx.moveTo(left - roofOverhang, top + height * 0.08);
-    ctx.lineTo(left + width / 2, top - height * 0.28);
-    ctx.lineTo(left + width + roofOverhang, top + height * 0.08);
-    ctx.closePath();
-    ctx.fill();
-    ctx.strokeStyle = accent;
-    ctx.lineWidth = Math.max(1, width * 0.025);
-    ctx.stroke();
-
-    ctx.fillStyle = '#c27639';
-    ctx.fillRect(left + width * 0.07, top - height * 0.4, Math.max(2, width * 0.04), height * 0.4);
-    ctx.fillStyle = accent;
-    ctx.globalAlpha = 0.86;
-    ctx.beginPath();
-    ctx.moveTo(left + width * 0.09, top - height * 0.36);
-    ctx.lineTo(left + width * 0.37, top - height * 0.28);
-    ctx.lineTo(left + width * 0.09, top - height * 0.16);
-    ctx.closePath();
-    ctx.fill();
-    ctx.globalAlpha = 1;
+    ctx.restore();
   }
 
   private renderLandmark(point: Vec2, type: string, projected: ProjectedPoint, time: number): void {

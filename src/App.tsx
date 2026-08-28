@@ -46,6 +46,8 @@ export default function App() {
       console.error('Failed to load saved upgrade progress', e);
     }
     const savedMaxHull = 100 + savedUpgrades.hull * 18;
+    // A reload starts a fresh sortie; never strand the player at 0 hull after a prior run.
+    if (savedHullIntegrity <= 0) savedHullIntegrity = savedMaxHull;
 
     return {
       currentDistrict: 'lantern_bazaar',

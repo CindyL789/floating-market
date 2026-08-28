@@ -118,6 +118,11 @@ export default function App() {
       ...prev,
       currentDistrict: null,
       viewMode: 'flight',
+      playerPos: prev.currentDistrict
+        ? { x: Math.max(50, DISTRICTS[prev.currentDistrict].coordinates.x - 140), y: DISTRICTS[prev.currentDistrict].coordinates.y }
+        : prev.playerPos,
+      playerVelocity: { x: 0, y: 0 },
+      playerAngle: 0,
       logMessages: [
         {
           id: Date.now().toString(),

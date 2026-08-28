@@ -1,8 +1,7 @@
-import React, { useEffect, useRef, useState, useCallback } from 'react';
-import { GameState, DistrictId, LanternMode } from '../types';
-import { DISTRICTS, GEAR_RIGS } from '../data/gameData';
-import { sound } from '../utils/audio';
-import { Compass, Zap, Anchor, Wind, ShieldAlert, Sparkles, Navigation } from 'lucide-react';
+import React, { useEffect, useRef, useState } from 'react';
+import { Anchor, Compass, Gauge, Navigation, Shield, Sparkles, Wind, Zap } from 'lucide-react';
+import { CarmackEngine, FlightTelemetry } from '../game/CarmackEngine';
+import { DistrictId, GameState, LanternMode } from '../types';
 
 interface Props {
   gameState: GameState;
@@ -10,1064 +9,200 @@ interface Props {
   onDock: (districtId: DistrictId) => void;
 }
 
-interface Particle {
-  x: number;
-  y: number;
-  vx: number;
-  vy: number;
-  size: number;
-  alpha: number;
-  color: string;
-  maxLife: number;
-  life: number;
-}
+const DEFAULT_TELEMETRY: FlightTelemetry = {
+  speed: 0,
+  nearbyDistrict: null,
+  nearbyDistance: 9999,
+  inWind: false,
+  inStorm: false,
+  waypointDistance: null,
+  lanternMode: 'beacon',
+};
 
-interface Collectible {
-  id: string;
-  x: number;
-  y: number;
-  type: 'droplet' | 'salvage' | 'storm_charge';
-  value: number;
-  pulsePhase: number;
-}
+const lanternModes: { id: LanternMode; label: string; key: string; icon: React.ReactNode }[] = [
+  { id: 'signal', label: 'SIGNAL', key: '2', icon: <Sparkles size={14} /> },
+  { id: 'beacon', label: 'BEACON', key: '1', icon: <Navigation size={14} /> },
+  { id: 'ward', label: 'WARD', key: '3', icon: <Shield size={14} /> },
+];
 
-interface WindCurrent {
-  x1: number;
-  y1: number;
-  x2: number;
-  y2: number;
-  speed: number;
-  width: number;
-}
-
-interface LightningZone {
-  x: number;
-  y: number;
-  radius: number;
-  active: boolean;
-  strikeTimer: number;
-  arcs: { x1: number; y1: number; x2: number; y2: number }[];
-}
+const formatDistance = (distance: number | null) => distance === null ? '—' : `${distance}m`;
 
 export const SkyFlightCanvas: React.FC<Props> = ({ gameState, setGameState, onDock }) => {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
-  const containerRef = useRef<HTMLDivElement | null>(null);
-
-  // Flight simulation state
-  const posRef = useRef(gameState.playerPos);
-  const velRef = useRef(gameState.playerVelocity);
-  const angleRef = useRef(gameState.playerAngle);
-  const lanternModeRef = useRef(gameState.lanternMode);
-  const activeRigRef = useRef(gameState.activeRig);
-
-  // Key states
-  const keysRef = useRef<Record<string, boolean>>({});
-  
-  // Touch / Virtual joystick
+  const engineRef = useRef<CarmackEngine | null>(null);
+  const stateRef = useRef(gameState);
+  const dockRef = useRef(onDock);
+  const joystickRef = useRef<HTMLDivElement | null>(null);
+  const [telemetry, setTelemetry] = useState<FlightTelemetry>(DEFAULT_TELEMETRY);
   const [joystickActive, setJoystickActive] = useState(false);
   const [joystickVector, setJoystickVector] = useState({ x: 0, y: 0 });
-  const [nearbyDistrict, setNearbyDistrict] = useState<DistrictId | null>(null);
-  const [nearbyDistance, setNearbyDistance] = useState<number>(9999);
 
-  // World Elements
-  const collectiblesRef = useRef<Collectible[]>([
-    { id: 'd1', x: 600, y: 450, type: 'droplet', value: 10, pulsePhase: 0 },
-    { id: 'd2', x: 750, y: 380, type: 'droplet', value: 15, pulsePhase: 1 },
-    { id: 'd3', x: 1100, y: 600, type: 'droplet', value: 20, pulsePhase: 2 },
-    { id: 'd4', x: 480, y: 900, type: 'droplet', value: 15, pulsePhase: 3 },
-    { id: 'd5', x: 800, y: 1100, type: 'droplet', value: 25, pulsePhase: 4 },
-    { id: 'd6', x: 1300, y: 500, type: 'droplet', value: 20, pulsePhase: 5 },
-    { id: 's1', x: 900, y: 800, type: 'salvage', value: 40, pulsePhase: 0 },
-    { id: 's2', x: 1350, y: 900, type: 'salvage', value: 50, pulsePhase: 2 },
-    { id: 'z1', x: 350, y: 1150, type: 'storm_charge', value: 30, pulsePhase: 1 },
-    { id: 'z2', x: 850, y: 300, type: 'storm_charge', value: 30, pulsePhase: 3 },
-  ]);
+  stateRef.current = gameState;
+  dockRef.current = onDock;
 
-  const windCurrentsRef = useRef<WindCurrent[]>([
-    { x1: 450, y1: 520, x2: 1200, y2: 700, speed: 2.2, width: 90 },
-    { x1: 1250, y1: 700, x2: 1350, y2: 400, speed: 1.8, width: 80 },
-    { x1: 1350, y1: 300, x2: 950, y2: 220, speed: 2.0, width: 80 },
-    { x1: 900, y1: 250, x2: 450, y2: 500, speed: 2.5, width: 100 },
-    { x1: 500, y1: 600, x2: 420, y2: 1280, speed: 2.0, width: 90 },
-  ]);
-
-  const stormZonesRef = useRef<LightningZone[]>([
-    { x: 380, y: 1250, radius: 180, active: true, strikeTimer: 0, arcs: [] },
-    { x: 920, y: 950, radius: 150, active: true, strikeTimer: 0, arcs: [] },
-    { x: 750, y: 150, radius: 140, active: true, strikeTimer: 0, arcs: [] },
-  ]);
-
-  // Visual particles
-  const particlesRef = useRef<Particle[]>([]);
-  const koiSegmentsRef = useRef<{ x: number; y: number }[]>(
-    Array.from({ length: 9 }, (_, i) => ({ x: 500 - i * 12, y: 500 }))
-  );
-
-  // Sync refs when props update
-  const unlockedSkillsRef = useRef<string[]>(gameState.unlockedSkills || []);
-  useEffect(() => {
-    lanternModeRef.current = gameState.lanternMode;
-    activeRigRef.current = gameState.activeRig;
-    unlockedSkillsRef.current = gameState.unlockedSkills || [];
-  }, [gameState.lanternMode, gameState.activeRig, gameState.unlockedSkills]);
-
-  // Controls listeners
-  useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      keysRef.current[e.key.toLowerCase()] = true;
-      keysRef.current[e.code] = true;
-
-      // Quick lantern switch
-      if (e.key === '1') handleSetLantern('beacon');
-      if (e.key === '2') handleSetLantern('signal');
-      if (e.key === '3') handleSetLantern('ward');
-
-      // Docking trigger
-      if ((e.key === 'f' || e.key === 'F' || e.key === 'e' || e.key === 'E') && nearbyDistrict) {
-        onDock(nearbyDistrict);
-      }
-    };
-
-    const handleKeyUp = (e: KeyboardEvent) => {
-      keysRef.current[e.key.toLowerCase()] = false;
-      keysRef.current[e.code] = false;
-    };
-
-    window.addEventListener('keydown', handleKeyDown);
-    window.addEventListener('keyup', handleKeyUp);
-    return () => {
-      window.removeEventListener('keydown', handleKeyDown);
-      window.removeEventListener('keyup', handleKeyUp);
-    };
-  }, [nearbyDistrict, onDock]);
-
-  const handleSetLantern = (mode: LanternMode) => {
-    sound.playLanternIgnite(mode);
-    setGameState(prev => ({ ...prev, lanternMode: mode }));
-  };
-
-  // Main animation / simulation loop
   useEffect(() => {
     const canvas = canvasRef.current;
-    if (!canvas) return;
-    const ctx = canvas.getContext('2d');
-    if (!ctx) return;
-
-    let animId: number;
-    let lastTime = performance.now();
-
-    const resize = () => {
-      if (!containerRef.current || !canvas) return;
-      canvas.width = containerRef.current.clientWidth;
-      canvas.height = containerRef.current.clientHeight;
-    };
-    resize();
-    window.addEventListener('resize', resize);
-
-    // Audio ambience start
-    sound.startAtmosphericAmbience();
-
-    const loop = (currentTime: number) => {
-      const dt = Math.min((currentTime - lastTime) / 1000, 0.1);
-      lastTime = currentTime;
-
-      // 1. INPUT & FLIGHT DYNAMICS
-      const keys = keysRef.current;
-      const rig = GEAR_RIGS[activeRigRef.current];
-      const accelBase = rig?.id === 'standard_courier' ? 140 : 110;
-      const turnSpeed = 2.8;
-
-      let turning = 0;
-      if (keys['arrowleft'] || keys['a'] || keys['keya']) turning -= 1;
-      if (keys['arrowright'] || keys['d'] || keys['keyd']) turning += 1;
-
-      let thrust = 0;
-      if (keys['arrowup'] || keys['w'] || keys['keyw']) thrust += 1;
-      if (keys['arrowdown'] || keys['s'] || keys['keys']) thrust -= 0.5;
-      if (keys[' ']) thrust += 1.6; // Boost sail
-
-      // Virtual Joystick support
-      if (joystickActive) {
-        turning += joystickVector.x * 1.5;
-        thrust += -joystickVector.y * 1.5;
-      }
-
-      // Update angle & velocity
-      angleRef.current += turning * turnSpeed * dt;
-
-      const ax = Math.cos(angleRef.current) * thrust * accelBase;
-      const ay = Math.sin(angleRef.current) * thrust * accelBase;
-
-      velRef.current.x += ax * dt;
-      velRef.current.y += ay * dt;
-
-      // Wind current influence
-      const px = posRef.current.x;
-      const py = posRef.current.y;
-      let inWindCurrent = false;
-
-      windCurrentsRef.current.forEach(wc => {
-        // Line distance check
-        const dx = wc.x2 - wc.x1;
-        const dy = wc.y2 - wc.y1;
-        const len = Math.hypot(dx, dy);
-        const u = ((px - wc.x1) * dx + (py - wc.y1) * dy) / (len * len);
-        if (u >= 0 && u <= 1) {
-          const nx = wc.x1 + u * dx;
-          const ny = wc.y1 + u * dy;
-          const dist = Math.hypot(px - nx, py - ny);
-          if (dist < wc.width) {
-            inWindCurrent = true;
-            // Push along current vector
-            const ndx = dx / len;
-            const ndy = dy / len;
-            velRef.current.x += ndx * wc.speed * 85 * dt;
-            velRef.current.y += ndy * wc.speed * 85 * dt;
-
-            // Spawn stream bubble particles
-            if (Math.random() < 0.3) {
-              particlesRef.current.push({
-                x: px + (Math.random() - 0.5) * 30,
-                y: py + (Math.random() - 0.5) * 30,
-                vx: ndx * 60 + (Math.random() - 0.5) * 20,
-                vy: ndy * 60 + (Math.random() - 0.5) * 20,
-                size: 2 + Math.random() * 3,
-                alpha: 0.8,
-                color: '#38bdf8',
-                maxLife: 0.8,
-                life: 0.8
-              });
-            }
-          }
-        }
-      });
-
-      // Air resistance / friction
-      const friction = rig?.id === 'dawn_dock' ? 0.985 : 0.975;
-      velRef.current.x *= Math.pow(friction, dt * 60);
-      velRef.current.y *= Math.pow(friction, dt * 60);
-
-      // Passive bonus checks
-      const hasAeroSails = unlockedSkillsRef.current.includes('sail_aerodynamics');
-      const hasMoteMagnet = unlockedSkillsRef.current.includes('koi_harmonic_bond');
-      const hasDropletBonus = unlockedSkillsRef.current.includes('koi_pearl_gleaner');
-      const hasDoubleSalvage = unlockedSkillsRef.current.includes('salvage_keen_eye');
-      const hasStormPlating = unlockedSkillsRef.current.includes('storm_plating_1');
-
-      // Max velocity cap (boosted by aero spinnakers)
-      const currentSpeed = Math.hypot(velRef.current.x, velRef.current.y);
-      const baseMaxSpeed = inWindCurrent ? 320 : (keys[' '] ? 260 : 190);
-      const maxSpeed = baseMaxSpeed * (hasAeroSails ? 1.25 : 1.0);
-      if (currentSpeed > maxSpeed) {
-        velRef.current.x = (velRef.current.x / currentSpeed) * maxSpeed;
-        velRef.current.y = (velRef.current.y / currentSpeed) * maxSpeed;
-      }
-
-      // Update position
-      posRef.current.x += velRef.current.x * dt;
-      posRef.current.y += velRef.current.y * dt;
-
-      // Keep in world bounds (0, 0) to (1800, 1600)
-      posRef.current.x = Math.max(50, Math.min(1750, posRef.current.x));
-      posRef.current.y = Math.max(50, Math.min(1550, posRef.current.y));
-
-      // 2. NAMI (MOON-KOI) PROCEDURAL IK SWIMMING
-      const koiTargetDist = 45;
-      const koiTargetAngle = angleRef.current + Math.PI * 0.75 + Math.sin(currentTime * 0.003) * 0.4;
-      const koiTargetX = posRef.current.x + Math.cos(koiTargetAngle) * koiTargetDist;
-      const koiTargetY = posRef.current.y + Math.sin(koiTargetAngle) * koiTargetDist;
-
-      // Head leads
-      const head = koiSegmentsRef.current[0];
-      head.x += (koiTargetX - head.x) * 6 * dt;
-      head.y += (koiTargetY - head.y) * 6 * dt;
-
-      // Trailing spine segments
-      for (let i = 1; i < koiSegmentsRef.current.length; i++) {
-        const prev = koiSegmentsRef.current[i - 1];
-        const curr = koiSegmentsRef.current[i];
-        const segDist = 8;
-        const dx = curr.x - prev.x;
-        const dy = curr.y - prev.y;
-        const dist = Math.hypot(dx, dy) || 0.001;
-        const targetX = prev.x + (dx / dist) * segDist;
-        const targetY = prev.y + (dy / dist) * segDist;
-
-        // Wave undulation
-        const wave = Math.sin(currentTime * 0.008 - i * 0.6) * (i * 0.8);
-        const perpX = -dy / dist;
-        const perpY = dx / dist;
-
-        curr.x += (targetX + perpX * wave - curr.x) * 14 * dt;
-        curr.y += (targetY + perpY * wave - curr.y) * 14 * dt;
-      }
-
-      // Spawn koi luminescence trail
-      if (Math.random() < 0.5) {
-        const tail = koiSegmentsRef.current[koiSegmentsRef.current.length - 1];
-        particlesRef.current.push({
-          x: tail.x + (Math.random() - 0.5) * 6,
-          y: tail.y + (Math.random() - 0.5) * 6,
-          vx: (Math.random() - 0.5) * 15,
-          vy: (Math.random() - 0.5) * 15,
-          size: 2 + Math.random() * 3,
-          alpha: 0.9,
-          color: '#38bdf8',
-          maxLife: 1.2,
-          life: 1.2
-        });
-      }
-
-      // Skiff wake trail
-      if (currentSpeed > 30 && Math.random() < 0.4) {
-        const sternX = posRef.current.x - Math.cos(angleRef.current) * 18;
-        const sternY = posRef.current.y - Math.sin(angleRef.current) * 18;
-        particlesRef.current.push({
-          x: sternX,
-          y: sternY,
-          vx: -velRef.current.x * 0.2 + (Math.random() - 0.5) * 10,
-          vy: -velRef.current.y * 0.2 + (Math.random() - 0.5) * 10,
-          size: 3 + Math.random() * 4,
-          alpha: 0.6,
-          color: '#94a3b8',
-          maxLife: 0.7,
-          life: 0.7
-        });
-      }
-
-      // 3. COLLECTIBLES INTERACTION (with magnetic mote attraction if unlocked)
-      const baseReach = lanternModeRef.current === 'beacon' ? 70 : 45;
-      const reachDist = baseReach * (hasMoteMagnet ? 1.75 : 1.0);
-
-      collectiblesRef.current.forEach((col) => {
-        const cdx = col.x - posRef.current.x;
-        const cdy = col.y - posRef.current.y;
-        const dist = Math.hypot(cdx, cdy);
-
-        // Magnetic attraction toward player
-        if (hasMoteMagnet && dist < 180 && dist > 10) {
-          const pull = (180 - dist) * 1.8 * dt;
-          col.x -= (cdx / dist) * pull;
-          col.y -= (cdy / dist) * pull;
-        }
-
-        if (dist < reachDist) {
-          // Collect!
-          if (col.type === 'droplet') {
-            sound.playCollectDroplet();
-            const earnedDroplets = Math.round(col.value * (hasDropletBonus ? 1.5 : 1.0));
-            setGameState(prev => ({
-              ...prev,
-              droplets: prev.droplets + earnedDroplets,
-              stats: {
-                ...prev.stats,
-                koiAffinity: Math.min(100, prev.stats.koiAffinity + 2)
-              }
-            }));
-          } else if (col.type === 'salvage') {
-            sound.playBrassClink();
-            const earnedFavors = hasDoubleSalvage ? 2 : 1;
-            const earnedDroplets = Math.round(col.value * (hasDropletBonus ? 1.5 : 1.0));
-            setGameState(prev => ({
-              ...prev,
-              favors: prev.favors + earnedFavors,
-              droplets: prev.droplets + earnedDroplets,
-              logMessages: [
-                {
-                  id: Date.now().toString(),
-                  text: `Recovered adrift message capsule (+${earnedDroplets} Droplets, +${earnedFavors} Favor${earnedFavors > 1 ? 's' : ''})`,
-                  time: 'Just now',
-                  type: 'reward'
-                },
-                ...prev.logMessages
-              ]
-            }));
-          } else if (col.type === 'storm_charge') {
-            sound.playLanternIgnite('ward');
-            setGameState(prev => ({
-              ...prev,
-              stormJars: prev.stormJars + 1,
-              logMessages: [
-                {
-                  id: Date.now().toString(),
-                  text: 'Harvested condensed Storm Jar from cloud well!',
-                  time: 'Just now',
-                  type: 'reward'
-                },
-                ...prev.logMessages
-              ]
-            }));
-          }
-
-          // Spawn burst particles
-          for (let p = 0; p < 12; p++) {
-            const pAngle = Math.random() * Math.PI * 2;
-            const pSpeed = 30 + Math.random() * 60;
-            particlesRef.current.push({
-              x: col.x,
-              y: col.y,
-              vx: Math.cos(pAngle) * pSpeed,
-              vy: Math.sin(pAngle) * pSpeed,
-              size: 3 + Math.random() * 4,
-              alpha: 1,
-              color: col.type === 'droplet' ? '#38bdf8' : col.type === 'salvage' ? '#fbbf24' : '#c084fc',
-              maxLife: 0.8,
-              life: 0.8
-            });
-          }
-
-          // Respawn elsewhere
-          col.x = 200 + Math.random() * 1400;
-          col.y = 200 + Math.random() * 1200;
-        }
-      });
-
-      // 4. STORM HAZARDS & LIGHTNING
-      stormZonesRef.current.forEach(sz => {
-        sz.strikeTimer += dt;
-        if (sz.strikeTimer > 2.5 + Math.random() * 2) {
-          sz.strikeTimer = 0;
-          // Generate jagged arcs
-          sz.arcs = [];
-          let curX = sz.x + (Math.random() - 0.5) * 80;
-          let curY = sz.y - sz.radius * 0.8;
-          for (let a = 0; a < 6; a++) {
-            const nextX = curX + (Math.random() - 0.5) * 50;
-            const nextY = curY + (sz.radius * 1.6) / 6;
-            sz.arcs.push({ x1: curX, y1: curY, x2: nextX, y2: nextY });
-            curX = nextX;
-            curY = nextY;
-          }
-
-          // Check if player near lightning
-          const distToStorm = Math.hypot(posRef.current.x - sz.x, posRef.current.y - sz.y);
-          if (distToStorm < sz.radius) {
-            sound.playThunderRumble();
-            if (activeRigRef.current !== 'storm_run' && lanternModeRef.current !== 'ward') {
-              // Take hull damage (reduced by 50% if conductive storm plating unlocked)
-              const dmg = hasStormPlating ? 4 : 8;
-              setGameState(prev => {
-                const newHull = Math.max(10, prev.stats.hullIntegrity - dmg);
-                return {
-                  ...prev,
-                  stats: { ...prev.stats, hullIntegrity: newHull }
-                };
-              });
-            }
-          }
-        }
-      });
-
-      // 5. DISTRICT DOCKING PROXIMITY CHECK
-      let closestDist: DistrictId | null = null;
-      let minD = 99999;
-
-      (Object.keys(DISTRICTS) as DistrictId[]).forEach(dId => {
-        const d = DISTRICTS[dId];
-        const dist = Math.hypot(posRef.current.x - d.coordinates.x, posRef.current.y - d.coordinates.y);
-        if (dist < minD) {
-          minD = dist;
-          if (dist < 110) {
-            closestDist = dId;
-          }
-        }
-      });
-
-      setNearbyDistrict(closestDist);
-      setNearbyDistance(Math.round(minD));
-
-      // 6. RENDER SCENE WITH CAMERA CENTERING
-      const camX = canvas.width / 2 - posRef.current.x;
-      const camY = canvas.height / 2 - posRef.current.y;
-
-      ctx.save();
-      ctx.clearRect(0, 0, canvas.width, canvas.height);
-
-      // Deep sky gradient background
-      const skyGrad = ctx.createLinearGradient(0, 0, canvas.width, canvas.height);
-      skyGrad.addColorStop(0, '#040711');
-      skyGrad.addColorStop(0.5, '#071021');
-      skyGrad.addColorStop(1, '#02050d');
-      ctx.fillStyle = skyGrad;
-      ctx.fillRect(0, 0, canvas.width, canvas.height);
-
-      // Camera transform
-      ctx.translate(camX, camY);
-
-      // Draw Grid / Cloud Sea Parallax Layers
-      ctx.strokeStyle = 'rgba(30, 58, 102, 0.15)';
-      ctx.lineWidth = 1;
-      const gridSize = 120;
-      for (let x = 0; x <= 1800; x += gridSize) {
-        ctx.beginPath();
-        ctx.moveTo(x, 0);
-        ctx.lineTo(x, 1600);
-        ctx.stroke();
-      }
-      for (let y = 0; y <= 1600; y += gridSize) {
-        ctx.beginPath();
-        ctx.moveTo(0, y);
-        ctx.lineTo(1800, y);
-        ctx.stroke();
-      }
-
-      // Draw Cloud Sea Billows (Atmospheric Depth)
-      ctx.fillStyle = 'rgba(15, 23, 42, 0.4)';
-      for (let i = 0; i < 16; i++) {
-        const cx = (i * 230 + currentTime * 0.01) % 1900;
-        const cy = (i * 180 + Math.sin(i + currentTime * 0.001) * 60) % 1700;
-        ctx.beginPath();
-        ctx.arc(cx, cy, 140, 0, Math.PI * 2);
-        ctx.fill();
-      }
-
-      // Draw Wind Currents (Slipstream ribbons)
-      windCurrentsRef.current.forEach(wc => {
-        const streamGrad = ctx.createLinearGradient(wc.x1, wc.y1, wc.x2, wc.y2);
-        streamGrad.addColorStop(0, 'rgba(56, 189, 248, 0.05)');
-        streamGrad.addColorStop(0.5, 'rgba(56, 189, 248, 0.22)');
-        streamGrad.addColorStop(1, 'rgba(56, 189, 248, 0.05)');
-
-        ctx.strokeStyle = streamGrad;
-        ctx.lineWidth = wc.width;
-        ctx.lineCap = 'round';
-        ctx.beginPath();
-        ctx.moveTo(wc.x1, wc.y1);
-        ctx.lineTo(wc.x2, wc.y2);
-        ctx.stroke();
-
-        // Flowing current arrows
-        const dx = wc.x2 - wc.x1;
-        const dy = wc.y2 - wc.y1;
-        const len = Math.hypot(dx, dy);
-        const numArrows = Math.floor(len / 80);
-        for (let a = 0; a < numArrows; a++) {
-          const prog = ((a / numArrows) + (currentTime * 0.0003 * wc.speed)) % 1;
-          const ax = wc.x1 + dx * prog;
-          const ay = wc.y1 + dy * prog;
-          const aAngle = Math.atan2(dy, dx);
-
-          ctx.fillStyle = 'rgba(125, 211, 252, 0.6)';
-          ctx.beginPath();
-          ctx.arc(ax, ay, 3, 0, Math.PI * 2);
-          ctx.fill();
-        }
-      });
-
-      // Draw Storm Vortexes & Lightning
-      stormZonesRef.current.forEach(sz => {
-        const stormGrad = ctx.createRadialGradient(sz.x, sz.y, 10, sz.x, sz.y, sz.radius);
-        stormGrad.addColorStop(0, 'rgba(88, 28, 135, 0.45)');
-        stormGrad.addColorStop(0.7, 'rgba(30, 27, 75, 0.25)');
-        stormGrad.addColorStop(1, 'rgba(15, 23, 42, 0)');
-
-        ctx.fillStyle = stormGrad;
-        ctx.beginPath();
-        ctx.arc(sz.x, sz.y, sz.radius, 0, Math.PI * 2);
-        ctx.fill();
-
-        // Storm boundary ring
-        ctx.strokeStyle = 'rgba(168, 85, 247, 0.3)';
-        ctx.lineWidth = 2;
-        ctx.setLineDash([8, 8]);
-        ctx.beginPath();
-        ctx.arc(sz.x, sz.y, sz.radius, 0, Math.PI * 2);
-        ctx.stroke();
-        ctx.setLineDash([]);
-
-        // Active lightning arcs
-        if (sz.arcs.length > 0) {
-          ctx.strokeStyle = '#e9d5ff';
-          ctx.shadowColor = '#c084fc';
-          ctx.shadowBlur = 15;
-          ctx.lineWidth = 3;
-          ctx.beginPath();
-          sz.arcs.forEach((arc, i) => {
-            if (i === 0) ctx.moveTo(arc.x1, arc.y1);
-            ctx.lineTo(arc.x2, arc.y2);
-          });
-          ctx.stroke();
-          ctx.shadowBlur = 0;
-        }
-      });
-
-      // Draw District Platforms & Floating Barges
-      (Object.keys(DISTRICTS) as DistrictId[]).forEach(dId => {
-        const d = DISTRICTS[dId];
-        const isSelected = nearbyDistrict === dId;
-
-        // Monumental Anchor Chains (especially for Storm Anchor Shrine)
-        if (dId === 'storm_anchor_shrine') {
-          ctx.strokeStyle = '#1e293b';
-          ctx.lineWidth = 14;
-          ctx.beginPath();
-          ctx.moveTo(d.coordinates.x, d.coordinates.y);
-          ctx.lineTo(d.coordinates.x - 120, d.coordinates.y + 350);
-          ctx.stroke();
-          
-          ctx.lineWidth = 8;
-          ctx.strokeStyle = '#0f172a';
-          ctx.beginPath();
-          ctx.moveTo(d.coordinates.x, d.coordinates.y);
-          ctx.lineTo(d.coordinates.x + 160, d.coordinates.y + 380);
-          ctx.stroke();
-        }
-
-        // Platform Base Shadow & Hull
-        ctx.save();
-        ctx.translate(d.coordinates.x, d.coordinates.y);
-
-        // Platform Aura / Glow
-        const platGlow = ctx.createRadialGradient(0, 0, 20, 0, 0, 110);
-        platGlow.addColorStop(0, d.accentColor + '33');
-        platGlow.addColorStop(1, d.accentColor + '00');
-        ctx.fillStyle = platGlow;
-        ctx.beginPath();
-        ctx.arc(0, 0, 110, 0, Math.PI * 2);
-        ctx.fill();
-
-        // Docking Perimeter Circle
-        ctx.strokeStyle = isSelected ? '#fbbf24' : d.accentColor + '55';
-        ctx.lineWidth = isSelected ? 3 : 1.5;
-        if (isSelected) {
-          ctx.shadowColor = '#fbbf24';
-          ctx.shadowBlur = 12;
-        }
-        ctx.setLineDash(isSelected ? [10, 6] : [6, 6]);
-        ctx.beginPath();
-        ctx.arc(0, 0, 85, 0, Math.PI * 2);
-        ctx.stroke();
-        ctx.setLineDash([]);
-        ctx.shadowBlur = 0;
-
-        // Black-Lacquer Barge Hull Shape
-        ctx.fillStyle = '#090d16';
-        ctx.strokeStyle = '#1e293b';
-        ctx.lineWidth = 3;
-        ctx.beginPath();
-        ctx.ellipse(0, 0, 52, 34, 0, 0, Math.PI * 2);
-        ctx.fill();
-        ctx.stroke();
-
-        // Architectural details (Temple roof / Lantern posts)
-        ctx.fillStyle = d.accentColor;
-        ctx.beginPath();
-        ctx.arc(0, 0, 10, 0, Math.PI * 2);
-        ctx.fill();
-
-        // Hanging Amber & Blue Lanterns
-        const lanternAngles = [0, Math.PI * 0.5, Math.PI, Math.PI * 1.5];
-        lanternAngles.forEach((la, idx) => {
-          const lx = Math.cos(la) * 36;
-          const ly = Math.sin(la) * 22;
-          ctx.fillStyle = idx % 2 === 0 ? '#38bdf8' : '#f59e0b';
-          ctx.shadowColor = idx % 2 === 0 ? '#38bdf8' : '#f59e0b';
-          ctx.shadowBlur = 10;
-          ctx.beginPath();
-          ctx.arc(lx, ly, 4, 0, Math.PI * 2);
-          ctx.fill();
-        });
-        ctx.shadowBlur = 0;
-
-        // District Name Banner
-        ctx.font = 'bold 13px Cinzel, serif';
-        ctx.fillStyle = '#f8fafc';
-        ctx.textAlign = 'center';
-        ctx.fillText(d.name, 0, -48);
-
-        ctx.font = '10px "Plus Jakarta Sans", sans-serif';
-        ctx.fillStyle = isSelected ? '#fbbf24' : '#94a3b8';
-        ctx.fillText(isSelected ? '⚓ PRESS [F] OR TAP TO DOCK' : d.epithet, 0, 50);
-
-        ctx.restore();
-      });
-
-      // Draw Collectibles
-      collectiblesRef.current.forEach(col => {
-        const pulse = 1 + Math.sin(currentTime * 0.005 + col.pulsePhase) * 0.2;
-        ctx.save();
-        ctx.translate(col.x, col.y);
-
-        if (col.type === 'droplet') {
-          // Luminescent Moon Droplet
-          ctx.shadowColor = '#38bdf8';
-          ctx.shadowBlur = 14 * pulse;
-          ctx.fillStyle = '#38bdf8';
-          ctx.beginPath();
-          ctx.arc(0, 0, 6 * pulse, 0, Math.PI * 2);
-          ctx.fill();
-
-          ctx.fillStyle = '#ffffff';
-          ctx.beginPath();
-          ctx.arc(-1, -1, 2 * pulse, 0, Math.PI * 2);
-          ctx.fill();
-        } else if (col.type === 'salvage') {
-          // Brass Message Capsule / Lost Crate
-          ctx.shadowColor = '#fbbf24';
-          ctx.shadowBlur = 12 * pulse;
-          ctx.fillStyle = '#d97706';
-          ctx.strokeStyle = '#fef08a';
-          ctx.lineWidth = 1.5;
-          ctx.beginPath();
-          ctx.rect(-7 * pulse, -7 * pulse, 14 * pulse, 14 * pulse);
-          ctx.fill();
-          ctx.stroke();
-        } else if (col.type === 'storm_charge') {
-          // Storm Jar
-          ctx.shadowColor = '#c084fc';
-          ctx.shadowBlur = 15 * pulse;
-          ctx.fillStyle = '#9333ea';
-          ctx.beginPath();
-          ctx.arc(0, 0, 8 * pulse, 0, Math.PI * 2);
-          ctx.fill();
-          ctx.strokeStyle = '#e9d5ff';
-          ctx.lineWidth = 1.5;
-          ctx.stroke();
-        }
-        ctx.restore();
-      });
-
-      // Draw Active Particles
-      particlesRef.current.forEach((p, idx) => {
-        p.life -= dt;
-        p.x += p.vx * dt;
-        p.y += p.vy * dt;
-        if (p.life <= 0) {
-          particlesRef.current.splice(idx, 1);
-          return;
-        }
-        const alpha = (p.life / p.maxLife) * p.alpha;
-        ctx.fillStyle = p.color;
-        ctx.globalAlpha = alpha;
-        ctx.beginPath();
-        ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2);
-        ctx.fill();
-        ctx.globalAlpha = 1;
-      });
-
-      // 6. DRAW WAYPOINT BEACON (IF SET FROM WORLD MAP)
-      if (gameState.mapWaypoint) {
-        ctx.save();
-        // Dashed glowing line from skiff to waypoint
-        ctx.strokeStyle = '#38bdf8';
-        ctx.lineWidth = 2.5;
-        ctx.setLineDash([8, 8]);
-        ctx.beginPath();
-        ctx.moveTo(posRef.current.x, posRef.current.y);
-        ctx.lineTo(gameState.mapWaypoint.x, gameState.mapWaypoint.y);
-        ctx.stroke();
-        ctx.setLineDash([]);
-
-        // Destination Pulsing Beacon
-        ctx.shadowColor = '#38bdf8';
-        ctx.shadowBlur = 18;
-        ctx.strokeStyle = '#38bdf8';
-        ctx.lineWidth = 3;
-        const wave = 14 + Math.sin(currentTime * 0.006) * 6;
-        ctx.beginPath();
-        ctx.arc(gameState.mapWaypoint.x, gameState.mapWaypoint.y, wave, 0, Math.PI * 2);
-        ctx.stroke();
-
-        ctx.fillStyle = '#0284c7';
-        ctx.beginPath();
-        ctx.arc(gameState.mapWaypoint.x, gameState.mapWaypoint.y, 7, 0, Math.PI * 2);
-        ctx.fill();
-
-        ctx.fillStyle = '#f8fafc';
-        ctx.font = 'bold 12px Cinzel, serif';
-        ctx.textAlign = 'center';
-        ctx.fillText(gameState.mapWaypoint.label, gameState.mapWaypoint.x, gameState.mapWaypoint.y - 18);
-        ctx.restore();
-      }
-
-      // 7. DRAW NAMI (MOON-KOI)
-      ctx.save();
-      const koiAlpha = 0.88;
-      ctx.globalAlpha = koiAlpha;
-      const companionColors: Record<string, string> = {
-        azure_glow: '#38bdf8',
-        rose_gold: '#fb7185',
-        midnight_purple: '#c084fc',
-        emerald_jade: '#34d399',
-        solar_amber: '#fbbf24',
-      };
-      const koiColor = companionColors[gameState.character.koiCompanionColor] || '#38bdf8';
-
-      for (let i = 0; i < koiSegmentsRef.current.length; i++) {
-        const seg = koiSegmentsRef.current[i];
-        const segRadius = Math.max(3, 10 - i * 0.9);
-
-        // Segment glow
-        ctx.shadowColor = koiColor;
-        ctx.shadowBlur = 12;
-        ctx.fillStyle = i === 0 ? '#ffffff' : i < 4 ? koiColor : '#0284c7';
-        ctx.beginPath();
-        ctx.arc(seg.x, seg.y, segRadius, 0, Math.PI * 2);
-        ctx.fill();
-
-        // Glowing Translucent Fins on segment 2
-        if (i === 2) {
-          const prev = koiSegmentsRef.current[1];
-          const angle = Math.atan2(seg.y - prev.y, seg.x - prev.x);
-          const finLength = 16;
-
-          // Left fin
-          ctx.fillStyle = 'rgba(186, 230, 253, 0.6)';
-          ctx.beginPath();
-          ctx.ellipse(
-            seg.x + Math.cos(angle + Math.PI / 2) * 8,
-            seg.y + Math.sin(angle + Math.PI / 2) * 8,
-            finLength,
-            5,
-            angle + Math.PI / 3,
-            0,
-            Math.PI * 2
-          );
-          ctx.fill();
-
-          // Right fin
-          ctx.beginPath();
-          ctx.ellipse(
-            seg.x + Math.cos(angle - Math.PI / 2) * 8,
-            seg.y + Math.sin(angle - Math.PI / 2) * 8,
-            finLength,
-            5,
-            angle - Math.PI / 3,
-            0,
-            Math.PI * 2
-          );
-          ctx.fill();
-        }
-      }
-      ctx.shadowBlur = 0;
-      ctx.globalAlpha = 1;
-      ctx.restore();
-
-      // 8. DRAW SERA'S SALVAGE SKIFF & STAFF-LANTERN
-      ctx.save();
-      ctx.translate(posRef.current.x, posRef.current.y);
-      ctx.rotate(angleRef.current);
-
-      // Staff Lantern Beam
-      const mode = lanternModeRef.current;
-      const beamColor = mode === 'beacon' ? 'rgba(56, 189, 248, 0.22)' : mode === 'signal' ? 'rgba(245, 158, 11, 0.25)' : 'rgba(192, 132, 252, 0.3)';
-      const beamDist = mode === 'beacon' ? 260 : mode === 'signal' ? 190 : 130;
-      const beamSpread = mode === 'ward' ? Math.PI : Math.PI * 0.45;
-
-      const beamGrad = ctx.createRadialGradient(20, 0, 5, 20, 0, beamDist);
-      beamGrad.addColorStop(0, beamColor);
-      beamGrad.addColorStop(1, 'rgba(0,0,0,0)');
-
-      ctx.fillStyle = beamGrad;
-      ctx.beginPath();
-      ctx.moveTo(20, 0);
-      ctx.arc(20, 0, beamDist, -beamSpread / 2, beamSpread / 2);
-      ctx.closePath();
-      ctx.fill();
-
-      // Skiff Hull (Black Lacquer & Brass Trim)
-      ctx.fillStyle = '#0f172a';
-      ctx.strokeStyle = '#38bdf8';
-      ctx.lineWidth = 2;
-      ctx.beginPath();
-      ctx.moveTo(24, 0); // Prow
-      ctx.lineTo(-14, -10); // Port
-      ctx.lineTo(-20, -7);
-      ctx.lineTo(-20, 7);
-      ctx.lineTo(-14, 10); // Starboard
-      ctx.closePath();
-      ctx.fill();
-      ctx.stroke();
-
-      // Sail / Rig visual (Vermilion / Indigo cloth)
-      const rigStyle = GEAR_RIGS[activeRigRef.current];
-      ctx.fillStyle = rigStyle?.id === 'standard_courier' ? '#dc2626' : rigStyle?.id === 'dawn_dock' ? '#78716c' : '#7c3aed';
-      ctx.beginPath();
-      ctx.moveTo(6, 0);
-      ctx.lineTo(-12, -8);
-      ctx.lineTo(-8, 0);
-      ctx.lineTo(-12, 8);
-      ctx.closePath();
-      ctx.fill();
-
-      // Staff-Lantern Orb at prow
-      ctx.fillStyle = mode === 'beacon' ? '#38bdf8' : mode === 'signal' ? '#f59e0b' : '#c084fc';
-      ctx.shadowColor = ctx.fillStyle;
-      ctx.shadowBlur = 16;
-      ctx.beginPath();
-      ctx.arc(22, 0, 4, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.shadowBlur = 0;
-
-      ctx.restore();
-
-      ctx.restore(); // Restore camera transform
-
-      animId = requestAnimationFrame(loop);
-    };
-
-    animId = requestAnimationFrame(loop);
+    if (!canvas || engineRef.current) return;
+
+    const engine = new CarmackEngine({
+      canvas,
+      getState: () => stateRef.current,
+      updateState: setGameState,
+      onDock: (districtId) => dockRef.current(districtId),
+      onTelemetry: setTelemetry,
+    });
+    engineRef.current = engine;
+    engine.start();
 
     return () => {
-      cancelAnimationFrame(animId);
-      window.removeEventListener('resize', resize);
-    };
-  }, [joystickActive, joystickVector, nearbyDistrict, setGameState]);
-
-  // Sync position back to global state on unmount or docking
-  useEffect(() => {
-    return () => {
-      setGameState(prev => ({
-        ...prev,
-        playerPos: { ...posRef.current },
-        playerVelocity: { ...velRef.current },
-        playerAngle: angleRef.current
-      }));
+      engine.dispose();
+      engineRef.current = null;
     };
   }, [setGameState]);
 
-  // Scale Compass Target Angle calculation (Waypoint or Contract Destination)
-  const activeTargetLocation = gameState.mapWaypoint 
-    ? { name: `Waypoint: ${gameState.mapWaypoint.label}`, x: gameState.mapWaypoint.x, y: gameState.mapWaypoint.y }
-    : gameState.activeContract 
-    ? { name: DISTRICTS[gameState.activeContract.destination].name, x: DISTRICTS[gameState.activeContract.destination].coordinates.x, y: DISTRICTS[gameState.activeContract.destination].coordinates.y }
-    : { name: DISTRICTS.lantern_bazaar.name, x: DISTRICTS.lantern_bazaar.coordinates.x, y: DISTRICTS.lantern_bazaar.coordinates.y };
+  const handleJoystick = (event: React.PointerEvent<HTMLDivElement>) => {
+    const pad = joystickRef.current;
+    const engine = engineRef.current;
+    if (!pad || !engine) return;
+    const bounds = pad.getBoundingClientRect();
+    const radius = bounds.width * 0.5;
+    const dx = event.clientX - (bounds.left + radius);
+    const dy = event.clientY - (bounds.top + radius);
+    const length = Math.hypot(dx, dy) || 1;
+    const scale = Math.min(1, radius / length);
+    const vector = { x: (dx * scale) / radius, y: (dy * scale) / radius };
+    setJoystickVector(vector);
+    engine.setJoystick(true, vector.x, vector.y);
+  };
 
-  const targetAngle = Math.atan2(
-    activeTargetLocation.y - gameState.playerPos.y,
-    activeTargetLocation.x - gameState.playerPos.x
-  );
-  const targetDistanceLeagues = Math.round(Math.hypot(activeTargetLocation.x - gameState.playerPos.x, activeTargetLocation.y - gameState.playerPos.y) / 10);
+  const releaseJoystick = () => {
+    setJoystickActive(false);
+    setJoystickVector({ x: 0, y: 0 });
+    engineRef.current?.setJoystick(false, 0, 0);
+  };
+
+  const beginJoystick = (event: React.PointerEvent<HTMLDivElement>) => {
+    event.currentTarget.setPointerCapture?.(event.pointerId);
+    setJoystickActive(true);
+    handleJoystick(event);
+  };
+
+  const setLantern = (mode: LanternMode) => {
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: mode === 'beacon' ? '1' : mode === 'signal' ? '2' : '3' }));
+  };
+
+  const hullPercent = Math.max(0, Math.min(100, gameState.stats.hullIntegrity / gameState.stats.maxHull * 100));
+  const isDockable = Boolean(telemetry.nearbyDistrict);
 
   return (
-    <div ref={containerRef} className="relative w-full h-full min-h-[520px] bg-[#070b14] overflow-hidden select-none">
-      {/* 2D Canvas */}
-      <canvas ref={canvasRef} className="w-full h-full block cursor-crosshair" />
+    <section className="relative h-full w-full overflow-hidden bg-[#030712]" aria-label="Skyways flight deck">
+      <canvas ref={canvasRef} className="absolute inset-0 h-full w-full touch-none" />
 
-      {/* Top HUD: Scale Compass & Status */}
-      <div className="absolute top-4 left-4 right-4 pointer-events-none flex items-start justify-between">
-        {/* Scale Compass Widget */}
-        <div className="pointer-events-auto bg-slate-900/85 backdrop-blur-md border border-sky-500/30 rounded-2xl p-3.5 shadow-xl flex items-center gap-3.5">
-          <div className="relative w-12 h-12 rounded-full border border-sky-400/40 bg-slate-950 flex items-center justify-center shadow-inner">
-            {/* Compass Needle */}
-            <div 
-              className="absolute w-1.5 h-9 bg-gradient-to-t from-sky-500 to-amber-400 rounded-full transition-transform duration-200 shadow-sm shadow-amber-400/50"
-              style={{ transform: `rotate(${(targetAngle - gameState.playerAngle) * (180 / Math.PI) + 90}deg)` }}
-            />
-            <div className="w-3 h-3 rounded-full bg-slate-900 border border-sky-300 z-10" />
+      <div className="pointer-events-none absolute inset-0 flex flex-col justify-between p-4 sm:p-6">
+        <div className="flex items-start justify-between gap-4">
+          <div className="flex flex-col gap-2">
+            <div className="pointer-events-auto inline-flex w-fit items-center gap-2 rounded border border-cyan-400/40 bg-[#030b18]/80 px-3 py-2 font-mono text-[10px] font-bold tracking-[0.22em] text-cyan-200 shadow-[0_0_24px_rgba(34,211,238,0.12)] backdrop-blur-sm sm:text-xs">
+              <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-cyan-300 shadow-[0_0_10px_#67e8f9]" />
+              SKYWAYS // FLIGHT DECK
+              <span className="ml-1 hidden border-l border-cyan-300/20 pl-2 text-[9px] text-slate-500 sm:inline">CARMACK RENDERER v0.1</span>
+            </div>
+            <div className="flex w-52 items-center gap-2 rounded border border-white/10 bg-[#030b18]/70 px-3 py-2 backdrop-blur-sm sm:w-64">
+              <span className="font-mono text-[10px] font-bold tracking-[0.18em] text-slate-400">HULL</span>
+              <div className="h-2 flex-1 overflow-hidden rounded-sm bg-slate-900 ring-1 ring-white/10">
+                <div className={`h-full transition-all ${telemetry.inStorm ? 'bg-fuchsia-400' : 'bg-cyan-400'}`} style={{ width: `${hullPercent}%` }} />
+              </div>
+              <span className="font-mono text-[10px] text-slate-200">{Math.round(gameState.stats.hullIntegrity)}%</span>
+            </div>
           </div>
-          <div>
-            <div className="text-[11px] uppercase tracking-wider text-sky-400 font-semibold flex items-center gap-1.5">
-              <Compass className="w-3.5 h-3.5" />
-              Scale Compass (Moonlight Navigation)
-            </div>
-            <div className="text-sm font-bold text-slate-100 font-fantasy line-clamp-1">
-              Target: {activeTargetLocation.name}
-            </div>
-            <div className="text-xs text-sky-400 font-medium">
-              Distance: {targetDistanceLeagues} leagues
-            </div>
+
+          <div className="hidden items-start gap-5 rounded border border-white/10 bg-[#030b18]/75 px-4 py-2 text-right font-mono backdrop-blur-sm sm:flex">
+            <ResourceReadout label="DROPLETS" value={gameState.droplets.toLocaleString()} color="text-cyan-300" icon={<Sparkles size={13} />} />
+            <ResourceReadout label="FAVORS" value={gameState.favors.toString()} color="text-amber-300" icon={<Anchor size={13} />} />
+            <ResourceReadout label="STORM JARS" value={gameState.stormJars.toString()} color="text-violet-300" icon={<Zap size={13} />} />
           </div>
         </div>
 
-        {/* Staff Lantern Controls */}
-        <div className="pointer-events-auto bg-slate-900/85 backdrop-blur-md border border-slate-700/60 rounded-2xl p-2 shadow-xl flex items-center gap-1.5">
-          <button
-            id="btn-lantern-beacon"
-            onClick={() => handleSetLantern('beacon')}
-            className={`px-3 py-1.5 rounded-xl text-xs font-semibold flex items-center gap-1.5 transition-all ${
-              gameState.lanternMode === 'beacon'
-                ? 'bg-sky-500 text-slate-950 shadow-md shadow-sky-500/30 font-bold'
-                : 'text-slate-300 hover:bg-slate-800'
-            }`}
-          >
-            <Sparkles className="w-3.5 h-3.5" />
-            Route Beacon [1]
-          </button>
-          <button
-            id="btn-lantern-signal"
-            onClick={() => handleSetLantern('signal')}
-            className={`px-3 py-1.5 rounded-xl text-xs font-semibold flex items-center gap-1.5 transition-all ${
-              gameState.lanternMode === 'signal'
-                ? 'bg-amber-500 text-slate-950 shadow-md shadow-amber-500/30 font-bold'
-                : 'text-slate-300 hover:bg-slate-800'
-            }`}
-          >
-            <Navigation className="w-3.5 h-3.5" />
-            Coded Signal [2]
-          </button>
-          <button
-            id="btn-lantern-ward"
-            onClick={() => handleSetLantern('ward')}
-            className={`px-3 py-1.5 rounded-xl text-xs font-semibold flex items-center gap-1.5 transition-all ${
-              gameState.lanternMode === 'ward'
-                ? 'bg-purple-500 text-slate-950 shadow-md shadow-purple-500/30 font-bold'
-                : 'text-slate-300 hover:bg-slate-800'
-            }`}
-          >
-            <ShieldAlert className="w-3.5 h-3.5" />
-            Storm Ward [3]
-          </button>
+        <div className="absolute left-1/2 top-4 flex -translate-x-1/2 flex-col items-center sm:top-6">
+          <div className="flex items-center gap-2 font-mono text-[10px] tracking-[0.35em] text-slate-400">
+            <span>NW</span><span className="text-slate-600">╱</span><span className="text-white">N</span><span className="text-cyan-300">◆ NE</span><span className="text-slate-600">╱</span><span>E</span><span className="text-slate-600">╱</span><span>SE</span>
+          </div>
+          <div className="mt-2 h-px w-52 bg-gradient-to-r from-transparent via-cyan-300/80 to-transparent sm:w-80" />
+          {telemetry.waypointDistance !== null && (
+            <div className="mt-3 rounded border border-cyan-300/30 bg-[#03121c]/80 px-3 py-1 text-center font-mono text-[10px] tracking-[0.16em] text-cyan-200 backdrop-blur-sm">
+              <div className="flex items-center justify-center gap-1.5 text-[9px] text-cyan-400"><Navigation size={11} /> WAYPOINT LOCK</div>
+              <div className="mt-0.5 font-bold">{formatDistance(telemetry.waypointDistance)}</div>
+            </div>
+          )}
+        </div>
+
+        <div className="pointer-events-auto flex items-end justify-between gap-3 pb-1 sm:pb-2">
+          <div className="flex items-end gap-3">
+            <div className="relative hidden h-28 w-28 items-center justify-center rounded-full border border-cyan-300/40 bg-[#030b18]/75 font-mono backdrop-blur-sm sm:flex">
+              <div className="absolute inset-2 rounded-full border border-cyan-300/15" />
+              <div className="absolute inset-4 rounded-full border border-dashed border-cyan-300/20" />
+              <div className="absolute left-1/2 top-2 h-2 w-px bg-cyan-200/80" />
+              <div className="text-center"><div className="text-2xl font-black tracking-tight text-slate-100">{telemetry.speed}</div><div className="text-[9px] font-bold tracking-[0.24em] text-cyan-300">KTS</div></div>
+              <Gauge className="absolute bottom-3 right-3 text-cyan-300/75" size={14} />
+            </div>
+            <div className="hidden flex-col gap-1.5 font-mono text-[10px] tracking-[0.16em] sm:flex">
+              <StatusChip icon={<Wind size={13} />} label={telemetry.inWind ? 'WIND CURRENT // RIDING' : 'WIND CURRENT // CLEAR'} active={telemetry.inWind} />
+              <StatusChip icon={<Zap size={13} />} label={telemetry.inStorm ? 'STORM FRONT // ACTIVE' : 'STORM FRONT // CLEAR'} active={telemetry.inStorm} danger={telemetry.inStorm} />
+            </div>
+          </div>
+
+          <div className="flex flex-col items-center gap-2">
+            <div className="rounded border border-white/15 bg-[#030b18]/85 p-1 shadow-[0_0_28px_rgba(12,180,220,0.1)] backdrop-blur-sm">
+              <div className="px-3 py-1 text-center font-mono text-[9px] font-bold tracking-[0.28em] text-slate-400">LANTERN MODE</div>
+              <div className="flex gap-1">
+                {lanternModes.map((mode) => (
+                  <button key={mode.id} onClick={() => setLantern(mode.id)} className={`flex min-w-[62px] flex-col items-center gap-1 border px-2 py-2 font-mono text-[9px] font-bold tracking-[0.12em] transition sm:min-w-[78px] ${telemetry.lanternMode === mode.id ? 'border-cyan-300 bg-cyan-300/10 text-cyan-200 shadow-[0_0_18px_rgba(34,211,238,0.2)]' : 'border-transparent text-slate-600 hover:border-white/15 hover:text-slate-300'}`}>
+                    {mode.icon}<span>{mode.label}</span><span className="text-[8px] text-slate-500">[{mode.key}]</span>
+                  </button>
+                ))}
+              </div>
+            </div>
+            <div className="hidden items-center gap-2 rounded border border-white/10 bg-[#030b18]/80 px-3 py-2 font-mono text-[9px] tracking-[0.14em] text-slate-400 backdrop-blur-sm sm:flex">
+              <kbd className="rounded border border-white/20 px-1.5 py-0.5 text-slate-200">WASD</kbd> / <kbd className="rounded border border-white/20 px-1.5 py-0.5 text-slate-200">ARROWS</kbd> MOVE
+              <kbd className="ml-1 rounded border border-white/20 px-1.5 py-0.5 text-slate-200">SPACE</kbd> BOOST
+              <kbd className="ml-1 rounded border border-white/20 px-1.5 py-0.5 text-slate-200">F</kbd> DOCK
+            </div>
+          </div>
+
+          <div className="flex items-end gap-2">
+            <div ref={joystickRef} onPointerDown={beginJoystick} onPointerMove={(event) => joystickActive && handleJoystick(event)} onPointerUp={releaseJoystick} onPointerCancel={releaseJoystick} className="pointer-events-auto relative flex h-24 w-24 touch-none items-center justify-center rounded-full border border-cyan-300/35 bg-[#030b18]/65 backdrop-blur-sm sm:hidden">
+              <div className="absolute inset-3 rounded-full border border-cyan-300/15" />
+              <div className="flex h-11 w-11 items-center justify-center rounded-full border border-cyan-200/50 bg-cyan-300/15 shadow-[0_0_18px_rgba(34,211,238,0.2)]" style={{ transform: `translate(${joystickVector.x * 15}px, ${joystickVector.y * 15}px)` }}>
+                <Compass size={16} className="text-cyan-200" />
+              </div>
+            </div>
+            {isDockable && (
+              <button onClick={() => telemetry.nearbyDistrict && dockRef.current(telemetry.nearbyDistrict)} className="flex items-center gap-2 rounded border border-amber-300 bg-amber-300/15 px-3 py-3 font-mono text-[10px] font-bold tracking-[0.18em] text-amber-100 shadow-[0_0_22px_rgba(245,158,11,0.22)] transition hover:bg-amber-300/25 sm:px-4">
+                <Anchor size={15} /> <span className="hidden sm:inline">{telemetry.nearbyDistance}m // </span> DOCK
+              </button>
+            )}
+          </div>
         </div>
       </div>
 
-      {/* Docking Callout (When near a district platform) */}
-      {nearbyDistrict && (
-        <div className="absolute bottom-24 left-1/2 -translate-x-1/2 pointer-events-auto animate-bounce">
-          <button
-            id="btn-dock-district"
-            onClick={() => onDock(nearbyDistrict)}
-            className="px-6 py-3.5 rounded-2xl bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-slate-950 font-bold text-base shadow-2xl shadow-amber-500/50 border border-amber-300 flex items-center gap-2.5 transition-transform active:scale-95"
-          >
-            <Anchor className="w-5 h-5" />
-            Dock at {DISTRICTS[nearbyDistrict].name} [Press F]
-          </button>
+      {telemetry.inStorm && (
+        <div className="pointer-events-none absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 rounded border border-fuchsia-300/45 bg-fuchsia-950/35 px-4 py-2 text-center font-mono text-[10px] tracking-[0.2em] text-fuchsia-100 shadow-[0_0_34px_rgba(217,70,239,0.2)] backdrop-blur-sm">
+          <div className="flex items-center justify-center gap-2"><Zap size={13} /> STORM SHEAR DETECTED</div>
+          <div className="mt-1 text-[9px] tracking-[0.12em] text-fuchsia-200/70">{telemetry.lanternMode === 'ward' || gameState.activeRig === 'storm_run' ? 'WARD FIELD HOLDING' : 'HULL INTEGRITY AT RISK'}</div>
         </div>
       )}
-
-      {/* Bottom Controls / Flight Hints */}
-      <div className="absolute bottom-4 left-4 pointer-events-none hidden md:flex items-center gap-3 text-xs text-slate-400 bg-slate-950/70 backdrop-blur-sm border border-slate-800 px-3.5 py-2 rounded-xl">
-        <span className="text-slate-200 font-semibold flex items-center gap-1"><Wind className="w-3.5 h-3.5 text-sky-400" /> Controls:</span>
-        <span><kbd className="px-1.5 py-0.5 bg-slate-800 rounded border border-slate-700 text-slate-200">WASD</kbd> / <kbd className="px-1.5 py-0.5 bg-slate-800 rounded border border-slate-700 text-slate-200">Arrows</kbd> Steer</span>
-        <span><kbd className="px-1.5 py-0.5 bg-slate-800 rounded border border-slate-700 text-slate-200">Space</kbd> Sail Boost</span>
-        <span><kbd className="px-1.5 py-0.5 bg-slate-800 rounded border border-slate-700 text-slate-200">1-3</kbd> Lantern Staff</span>
-      </div>
-
-      {/* On-screen Touch Controls for mobile */}
-      <div className="absolute bottom-6 right-6 pointer-events-auto flex items-center gap-3 md:hidden">
-        <div className="grid grid-cols-3 gap-2 bg-slate-900/80 p-2 rounded-2xl border border-slate-800">
-          <div />
-          <button
-            onPointerDown={() => { keysRef.current['arrowup'] = true; }}
-            onPointerUp={() => { keysRef.current['arrowup'] = false; }}
-            className="w-11 h-11 bg-slate-800 active:bg-sky-500 text-slate-200 rounded-xl flex items-center justify-center font-bold text-lg"
-          >
-            ▲
-          </button>
-          <div />
-          <button
-            onPointerDown={() => { keysRef.current['arrowleft'] = true; }}
-            onPointerUp={() => { keysRef.current['arrowleft'] = false; }}
-            className="w-11 h-11 bg-slate-800 active:bg-sky-500 text-slate-200 rounded-xl flex items-center justify-center font-bold text-lg"
-          >
-            ◀
-          </button>
-          <button
-            onPointerDown={() => { keysRef.current[' '] = true; }}
-            onPointerUp={() => { keysRef.current[' '] = false; }}
-            className="w-11 h-11 bg-amber-600/80 active:bg-amber-400 text-slate-950 rounded-xl flex items-center justify-center font-bold text-xs"
-          >
-            BOOST
-          </button>
-          <button
-            onPointerDown={() => { keysRef.current['arrowright'] = true; }}
-            onPointerUp={() => { keysRef.current['arrowright'] = false; }}
-            className="w-11 h-11 bg-slate-800 active:bg-sky-500 text-slate-200 rounded-xl flex items-center justify-center font-bold text-lg"
-          >
-            ▶
-          </button>
-        </div>
-      </div>
-    </div>
+    </section>
   );
 };
+
+const ResourceReadout = ({ label, value, color, icon }: { label: string; value: string; color: string; icon: React.ReactNode }) => (
+  <div className="min-w-[64px]">
+    <div className="flex items-center justify-end gap-1 text-[9px] tracking-[0.16em] text-slate-500">{icon}{label}</div>
+    <div className={`mt-0.5 text-sm font-bold ${color}`}>{value}</div>
+  </div>
+);
+
+const StatusChip = ({ icon, label, active, danger = false }: { icon: React.ReactNode; label: string; active: boolean; danger?: boolean }) => (
+  <div className={`flex items-center gap-2 rounded border px-2 py-1.5 ${danger && active ? 'border-fuchsia-300/40 bg-fuchsia-400/10 text-fuchsia-200' : active ? 'border-cyan-300/30 bg-cyan-300/10 text-cyan-200' : 'border-white/10 bg-[#030b18]/65 text-slate-500'}`}>
+    {icon}<span>{label}</span>
+  </div>
+);

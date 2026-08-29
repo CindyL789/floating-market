@@ -1,178 +1,149 @@
-/**
- * @license
- * SPDX-License-Identifier: Apache-2.0
- */
-
 import React, { useState, useEffect } from 'react';
-import { GameState, DistrictId } from './types';
-import { MAIN_QUESTS, INITIAL_INVENTORY, DISTRICTS, DEFAULT_CHARACTER } from './data/gameData';
+import {
+  GameState,
+  DistrictId,
+  RigId,
+  DialogueChoice,
+  DeliveryContract,
+  CharacterCustomization
+} from './types';
+import {
+  DEFAULT_CHARACTER,
+  INITIAL_INVENTORY,
+  MAIN_QUESTS,
+  GEAR_RIGS,
+  NPCS
+} from './data/gameData';
+
+import { TopNav } from './components/TopNav';
 import { SkyFlightCanvas } from './components/SkyFlightCanvas';
 import { DistrictView } from './components/DistrictView';
-import { TopNav } from './components/TopNav';
 import { DialogueModal } from './components/DialogueModal';
-import { GearRigsModal } from './components/GearRigsModal';
-import { CodexModal } from './components/CodexModal';
 import { UndertowGameModal } from './components/UndertowGameModal';
-import { CharacterCreatorModal } from './components/CharacterCreatorModal';
-import { WorldMapModal } from './components/WorldMapModal';
 import { SkillTreeModal } from './components/SkillTreeModal';
 import { UpgradeShopModal } from './components/UpgradeShopModal';
+import { GearRigsModal } from './components/GearRigsModal';
+import { WorldMapModal } from './components/WorldMapModal';
+import { CodexModal } from './components/CodexModal';
+import { CharacterCreatorModal } from './components/CharacterCreatorModal';
 import { QuestDrawer } from './components/QuestDrawer';
-import { sound } from './utils/audio';
 
-export default function App() {
+const initialGameState: GameState = {
+  currentDistrict: null,
+  viewMode: 'flight',
+  playerX: 520,
+  playerY: 530,
+  playerVelocityX: 0,
+  playerVelocityY: 0,
+  playerAngle: 0,
+  stats: {
+    hullIntegrity: 100,
+    maxHull: 100,
+    speedLevel: 1,
+    lanternPower: 100,
+    maxLanternPower: 100,
+    koiAffinity: 75
+  },
+  upgrades: {
+    hull: 0,
+    engine: 0,
+    weapon: 0
+  },
+  droplets: 150,
+  favors: 4,
+  stormJars: 2,
+  reputation: {
+    lanternGuild: 40,
+    undertowSyndicate: 25,
+    anchorMonks: 20
+  },
+  activeRig: 'standard_courier',
+  unlockedRigs: ['standard_courier'],
+  lanternMode: 'beacon',
+  activeQuests: MAIN_QUESTS,
+  completedQuestIds: [],
+  currentMainChapter: 1,
+  activeContract: null,
+  inventory: INITIAL_INVENTORY,
+  activeDialogueNodeId: null,
+  activeNpcId: null,
+  character: DEFAULT_CHARACTER,
+  discoveredLandmarks: ['landmark_lantern_bazaar', 'landmark_undertow_den'],
+  mapWaypoint: null,
+  unlockedSkills: [],
+  soundEnabled: true,
+  volume: 0.8,
+  logMessages: [
+    { id: '1', text: 'Skiff engines calibrated. Nami swimming alongside in starlight slipstream.', time: '00:01', type: 'info' },
+    { id: '2', text: 'Lantern Bazaar docking beacon aligned.', time: '00:02', type: 'reward' }
+  ]
+};
+
+export function App() {
   const [gameState, setGameState] = useState<GameState>(() => {
-    // Check if character was previously saved in localStorage
-    let savedChar = DEFAULT_CHARACTER;
-    try {
-      const stored = localStorage.getItem('moon_koi_character');
-      if (stored) {
-        savedChar = JSON.parse(stored);
+    const saved = localStorage.getItem('moon_koi_game_state');
+    if (saved) {
+      try {
+        return JSON.parse(saved);
+      } catch (e) {
+        // use initial
       }
-    } catch (e) {
-      console.error('Failed to load saved character', e);
     }
-
-    let savedUpgrades = { hull: 0, engine: 0, weapon: 0 };
-    let savedHullIntegrity = 100;
-    try {
-      const storedProgress = localStorage.getItem('moon_koi_upgrade_progress');
-      if (storedProgress) {
-        const parsed = JSON.parse(storedProgress);
-        savedUpgrades = { ...savedUpgrades, ...(parsed.upgrades || {}) };
-        savedHullIntegrity = typeof parsed.hullIntegrity === 'number' ? parsed.hullIntegrity : savedHullIntegrity;
-      }
-    } catch (e) {
-      console.error('Failed to load saved upgrade progress', e);
-    }
-    const savedMaxHull = 100 + savedUpgrades.hull * 18;
-    // A reload starts a fresh sortie; never strand the player at 0 hull after a prior run.
-    if (savedHullIntegrity <= 0) savedHullIntegrity = savedMaxHull;
-
-    return {
-      currentDistrict: 'lantern_bazaar',
-      viewMode: 'district', // starts docked at Lantern Bazaar for immediate story immersion
-      playerPos: { x: 500, y: 500 },
-      playerVelocity: { x: 0, y: 0 },
-      playerAngle: 0,
-      character: savedChar,
-      discoveredLandmarks: ['lantern_bazaar', 'star_weaver_wreck'],
-      mapWaypoint: null,
-      unlockedSkills: [],
-      stats: {
-        hullIntegrity: Math.min(savedMaxHull, savedHullIntegrity),
-        maxHull: savedMaxHull,
-        speedLevel: 1 + savedUpgrades.engine,
-        lanternPower: 100,
-        maxLanternPower: 100,
-        koiAffinity: 65
-      },
-      upgrades: savedUpgrades,
-      droplets: 80,
-      favors: 3,
-      stormJars: 1,
-      reputation: {
-        lanternGuild: 50,
-        undertowSyndicate: 15,
-        anchorMonks: 20
-      },
-      activeRig: 'standard_courier',
-      unlockedRigs: ['standard_courier'],
-      lanternMode: 'beacon',
-      activeQuests: MAIN_QUESTS,
-      completedQuestIds: [],
-      currentMainChapter: 1,
-      activeContract: null,
-      inventory: INITIAL_INVENTORY,
-      activeDialogueNodeId: null,
-      activeNpcId: null,
-      soundEnabled: true,
-      volume: 0.6,
-      logMessages: [
-        {
-          id: '1',
-          text: 'The markets open after moonrise. Blue lanterns guide the cloud sea.',
-          time: 'Just now',
-          type: 'story'
-        }
-      ]
-    };
+    return initialGameState;
   });
 
+  const [activeModal, setActiveModal] = useState<string | null>(null);
+
+  // Auto save to local storage
   useEffect(() => {
-    localStorage.setItem('moon_koi_upgrade_progress', JSON.stringify({
-      upgrades: gameState.upgrades,
-      hullIntegrity: gameState.stats.hullIntegrity,
-    }));
-  }, [gameState.upgrades, gameState.stats.hullIntegrity]);
+    localStorage.setItem('moon_koi_game_state', JSON.stringify(gameState));
+  }, [gameState]);
 
-  // Modal display states
-  const [showWardrobe, setShowWardrobe] = useState(false);
-  const [showCodex, setShowCodex] = useState(false);
-  const [showUndertowGame, setShowUndertowGame] = useState(false);
-  const [showCharacterCreator, setShowCharacterCreator] = useState(false);
-  const [showWorldMap, setShowWorldMap] = useState(false);
-  const [showSkillTree, setShowSkillTree] = useState(false);
-  const [showUpgradeShop, setShowUpgradeShop] = useState(false);
-
-  // Docking event from Sky Flight
-  const handleDockDistrict = (districtId: DistrictId) => {
-    sound.playTempleGong();
-    setGameState(prev => ({
-      ...prev,
-      currentDistrict: districtId,
-      viewMode: 'district',
-      playerPos: { ...DISTRICTS[districtId].coordinates },
-      playerVelocity: { x: 0, y: 0 },
-      logMessages: [
-        {
-          id: Date.now().toString(),
-          text: `Docked at ${DISTRICTS[districtId].name}`,
-          time: 'Just now',
-          type: 'info'
+  // Handlers
+  const handleDock = (districtId: DistrictId) => {
+    setGameState(prev => {
+      let repairBonus = 0;
+      if (prev.unlockedSkills.includes('hull_capacity_2')) {
+        repairBonus = 25;
+      }
+      return {
+        ...prev,
+        currentDistrict: districtId,
+        viewMode: 'district',
+        stats: {
+          ...prev.stats,
+          hullIntegrity: Math.min(prev.stats.maxHull, prev.stats.hullIntegrity + repairBonus),
+          lanternPower: prev.stats.maxLanternPower
         },
-        ...prev.logMessages
-      ]
-    }));
+        logMessages: [
+          { id: Date.now().toString(), text: `Docked at ${districtId.replace('_', ' ').toUpperCase()}`, time: 'NOW', type: 'reward' },
+          ...prev.logMessages
+        ]
+      };
+    });
   };
 
-  // Undock / Launch Skiff into Skyways
-  const handleUndockToSky = () => {
-    sound.playMoonChime(440);
-    sound.startAtmosphericAmbience();
+  const handleUndock = () => {
     setGameState(prev => ({
       ...prev,
-      currentDistrict: null,
       viewMode: 'flight',
-      playerPos: prev.currentDistrict
-        ? { x: Math.max(50, DISTRICTS[prev.currentDistrict].coordinates.x - 140), y: DISTRICTS[prev.currentDistrict].coordinates.y }
-        : prev.playerPos,
-      playerVelocity: { x: 0, y: 0 },
-      playerAngle: 0,
+      currentDistrict: null,
       logMessages: [
-        {
-          id: Date.now().toString(),
-          text: `Skiff launched into the Skyways. ${prev.character.name}'s Moon-Koi is swimming alongside.`,
-          time: 'Just now',
-          type: 'info'
-        },
+        { id: Date.now().toString(), text: 'Skiff launched into the Skyways.', time: 'NOW', type: 'info' },
         ...prev.logMessages
       ]
     }));
   };
 
-  // Open NPC dialogue
   const handleOpenDialogue = (npcId: string) => {
-    sound.playMoonChime(520);
     setGameState(prev => ({
       ...prev,
       activeNpcId: npcId,
-      activeDialogueNodeId: null,
+      activeDialogueNodeId: NPCS[npcId]?.dialogueTreeId || null,
       viewMode: 'dialogue'
     }));
   };
 
-  // Close dialogue modal
   const handleCloseDialogue = () => {
     setGameState(prev => ({
       ...prev,
@@ -182,114 +153,330 @@ export default function App() {
     }));
   };
 
+  const handleChoiceSelected = (choice: DialogueChoice) => {
+    setGameState(prev => {
+      let { droplets, favors, currentMainChapter, completedQuestIds } = prev;
+
+      if (choice.actionType === 'complete_ch1') {
+        currentMainChapter = 2;
+        droplets += 60;
+        favors += 2;
+        completedQuestIds = [...completedQuestIds, 'quest_chapter_1'];
+      } else if (choice.actionType === 'complete_ch2') {
+        currentMainChapter = 3;
+        droplets += 120;
+        favors += 4;
+        completedQuestIds = [...completedQuestIds, 'quest_chapter_2'];
+      } else if (choice.actionType === 'complete_ch3') {
+        currentMainChapter = 4;
+        droplets += 220;
+        favors += 6;
+        completedQuestIds = [...completedQuestIds, 'quest_chapter_3'];
+      } else if (choice.actionType === 'manus_mission') {
+        droplets += 50;
+        favors += 3;
+      }
+
+      if (!choice.nextNodeId) {
+        return {
+          ...prev,
+          droplets,
+          favors,
+          currentMainChapter,
+          completedQuestIds,
+          activeNpcId: null,
+          activeDialogueNodeId: null,
+          viewMode: prev.currentDistrict ? 'district' : 'flight'
+        };
+      }
+
+      return {
+        ...prev,
+        droplets,
+        favors,
+        currentMainChapter,
+        completedQuestIds,
+        activeDialogueNodeId: choice.nextNodeId
+      };
+    });
+  };
+
+  const handleAcceptContract = (contract: DeliveryContract) => {
+    setGameState(prev => ({
+      ...prev,
+      activeContract: contract,
+      logMessages: [
+        { id: Date.now().toString(), text: `Accepted shipment for ${contract.client}`, time: 'NOW', type: 'info' },
+        ...prev.logMessages
+      ]
+    }));
+  };
+
+  const handleDeliverContract = () => {
+    if (!gameState.activeContract) return;
+    const hasBonus = gameState.unlockedSkills.includes('contract_broker');
+    const dropletReward = gameState.activeContract.rewardDroplets * (hasBonus ? 1.3 : 1.0);
+    const favorReward = gameState.activeContract.rewardFavors + (hasBonus ? 1 : 0);
+
+    setGameState(prev => ({
+      ...prev,
+      droplets: Math.round(prev.droplets + dropletReward),
+      favors: prev.favors + favorReward,
+      activeContract: null,
+      logMessages: [
+        { id: Date.now().toString(), text: `Delivery complete! +${Math.round(dropletReward)} Droplets, +${favorReward} Favors`, time: 'NOW', type: 'reward' },
+        ...prev.logMessages
+      ]
+    }));
+  };
+
+  const handleBuyTraderItem = (itemId: string, cost: number) => {
+    if (gameState.droplets < cost) return;
+
+    setGameState(prev => {
+      let stats = { ...prev.stats };
+      let stormJars = prev.stormJars;
+
+      if (itemId === 'hull_repair') {
+        stats.hullIntegrity = Math.min(stats.maxHull, stats.hullIntegrity + 35);
+      } else if (itemId === 'storm_jar') {
+        stormJars += 1;
+      } else if (itemId === 'koi_treat') {
+        stats.koiAffinity = Math.min(100, stats.koiAffinity + 15);
+      }
+
+      return {
+        ...prev,
+        droplets: prev.droplets - cost,
+        stats,
+        stormJars,
+        logMessages: [
+          { id: Date.now().toString(), text: `Purchased ${itemId.replace('_', ' ')} for ${cost} Droplets`, time: 'NOW', type: 'info' },
+          ...prev.logMessages
+        ]
+      };
+    });
+  };
+
+  const handlePlayDice = (wager: number) => {
+    const p1 = Math.floor(Math.random() * 6) + 1;
+    const p2 = Math.floor(Math.random() * 6) + 1;
+    const p3 = Math.floor(Math.random() * 6) + 1;
+    const playerTotal = p1 + p2 + p3;
+
+    const b1 = Math.floor(Math.random() * 6) + 1;
+    const b2 = Math.floor(Math.random() * 6) + 1;
+    const b3 = Math.floor(Math.random() * 6) + 1;
+    const brokerTotal = b1 + b2 + b3;
+
+    const hasCharisma = gameState.activeRig === 'undertow_civilian';
+    const playerWon = hasCharisma ? playerTotal >= brokerTotal : playerTotal > brokerTotal;
+
+    if (playerWon) {
+      const payout = hasCharisma ? Math.round(wager * 1.3) : wager;
+      setGameState(prev => ({
+        ...prev,
+        droplets: prev.droplets + payout,
+        favors: prev.favors + 1
+      }));
+      return {
+        playerDice: [p1, p2, p3],
+        brokerDice: [b1, b2, b3],
+        message: `Victory! You scored ${playerTotal} vs Kael's ${brokerTotal}. Won +${payout} Droplets & +1 Favor!`
+      };
+    } else {
+      setGameState(prev => ({
+        ...prev,
+        droplets: Math.max(0, prev.droplets - wager)
+      }));
+      return {
+        playerDice: [p1, p2, p3],
+        brokerDice: [b1, b2, b3],
+        message: `Defeat. You scored ${playerTotal} vs Kael's ${brokerTotal}. Lost ${wager} Droplets.`
+      };
+    }
+  };
+
+  const handleUnlockSkill = (skillId: string) => {
+    setGameState(prev => {
+      const skill = NPCS; // dummy ref
+      return {
+        ...prev,
+        favors: prev.favors - 1,
+        unlockedSkills: [...prev.unlockedSkills, skillId],
+        stats: {
+          ...prev.stats,
+          maxHull: skillId === 'hull_capacity_1' ? 130 : (skillId === 'hull_capacity_2' ? 160 : prev.stats.maxHull),
+          maxLanternPower: skillId === 'max_lantern_1' ? 150 : prev.stats.maxLanternPower
+        }
+      };
+    });
+  };
+
+  const handleUpgradeSkiff = (type: 'hull' | 'engine' | 'weapon') => {
+    setGameState(prev => {
+      const currentLvl = prev.upgrades[type];
+      const cost = type === 'hull' ? 50 + currentLvl * 30 : type === 'engine' ? 60 + currentLvl * 35 : 70 + currentLvl * 40;
+      if (prev.droplets < cost) return prev;
+
+      return {
+        ...prev,
+        droplets: prev.droplets - cost,
+        upgrades: {
+          ...prev.upgrades,
+          [type]: currentLvl + 1
+        },
+        stats: {
+          ...prev.stats,
+          maxHull: type === 'hull' ? prev.stats.maxHull + 18 : prev.stats.maxHull
+        }
+      };
+    });
+  };
+
+  const handleEquipRig = (rigId: RigId) => {
+    setGameState(prev => {
+      const rig = GEAR_RIGS[rigId];
+      if (!prev.unlockedRigs.includes(rigId)) {
+        if (prev.droplets < rig.cost) return prev;
+        return {
+          ...prev,
+          droplets: prev.droplets - rig.cost,
+          unlockedRigs: [...prev.unlockedRigs, rigId],
+          activeRig: rigId
+        };
+      }
+      return {
+        ...prev,
+        activeRig: rigId
+      };
+    });
+  };
+
+  const handleSetWaypoint = (x: number, y: number, label: string) => {
+    setGameState(prev => ({
+      ...prev,
+      mapWaypoint: { x, y, label }
+    }));
+  };
+
+  const handleClearWaypoint = () => {
+    setGameState(prev => ({
+      ...prev,
+      mapWaypoint: null
+    }));
+  };
+
+  const handleUpdateCharacter = (character: CharacterCustomization) => {
+    setGameState(prev => ({ ...prev, character }));
+  };
+
   return (
-    <div className="relative w-screen h-screen flex flex-col bg-[#070b14] text-slate-100 overflow-hidden select-none">
-      {/* Top Status and Navigation Bar */}
+    <div className="flex flex-col w-screen h-screen overflow-hidden bg-[#070B14] text-slate-100">
+      {/* Top Header Navigation */}
       <TopNav
         gameState={gameState}
-        setGameState={setGameState}
-        onOpenWardrobe={() => setShowWardrobe(true)}
-        onOpenCodex={() => setShowCodex(true)}
-        onOpenCharacterCreator={() => setShowCharacterCreator(true)}
-        onOpenWorldMap={() => setShowWorldMap(true)}
-        onOpenSkillTree={() => setShowSkillTree(true)}
-        onOpenUpgradeShop={() => setShowUpgradeShop(true)}
+        onOpenModal={modal => setActiveModal(modal)}
       />
 
-      {/* Main Viewport */}
-      <main className="relative flex-1 w-full h-full overflow-hidden">
-        {/* Sky Flight View (Real-time Canvas) */}
+      {/* Main View Area */}
+      <main className="flex-1 relative overflow-hidden">
         {gameState.viewMode === 'flight' ? (
           <SkyFlightCanvas
             gameState={gameState}
-            setGameState={setGameState}
-            onDock={handleDockDistrict}
+            onDock={handleDock}
+            onUpdateState={setGameState}
+            onSetWaypoint={handleSetWaypoint}
+            onClearWaypoint={handleClearWaypoint}
+            onOpenModal={modal => setActiveModal(modal)}
           />
-        ) : (
-          /* Docked District View (RPG Market & NPC Interactions) */
+        ) : gameState.viewMode === 'district' && gameState.currentDistrict ? (
           <DistrictView
+            districtId={gameState.currentDistrict}
             gameState={gameState}
-            setGameState={setGameState}
-            onUndock={handleUndockToSky}
+            onUndock={handleUndock}
             onOpenDialogue={handleOpenDialogue}
-            onOpenWardrobe={() => setShowWardrobe(true)}
-            onOpenUndertowGame={() => setShowUndertowGame(true)}
-            onOpenSkillTree={() => setShowSkillTree(true)}
+            onAcceptContract={handleAcceptContract}
+            onDeliverContract={handleDeliverContract}
+            onBuyItem={handleBuyTraderItem}
+            onOpenDiceGame={() => setActiveModal('undertow_dice')}
+          />
+        ) : null}
+
+        {/* Dialogue Modal Overlay */}
+        {gameState.viewMode === 'dialogue' && (
+          <DialogueModal
+            gameState={gameState}
+            onChoiceSelected={handleChoiceSelected}
+            onClose={handleCloseDialogue}
           />
         )}
-
-        {/* Story Quest & Dispatch Objectives Drawer */}
-        <QuestDrawer gameState={gameState} />
       </main>
 
-      {/* Permanent Skiff Upgrade Shop */}
-      {showUpgradeShop && (
-        <UpgradeShopModal
-          gameState={gameState}
-          setGameState={setGameState}
-          onClose={() => setShowUpgradeShop(false)}
-        />
-      )}
-
-      {/* Astral Attunement & Skill Tree Modal */}
-      {showSkillTree && (
-        <SkillTreeModal
-          gameState={gameState}
-          setGameState={setGameState}
-          onClose={() => setShowSkillTree(false)}
-        />
-      )}
-
-      {/* Dialogue Modal */}
-      {gameState.viewMode === 'dialogue' && (
-        <DialogueModal
-          gameState={gameState}
-          setGameState={setGameState}
-          onClose={handleCloseDialogue}
-        />
-      )}
-
-      {/* Character Creator Modal */}
-      {showCharacterCreator && (
-        <CharacterCreatorModal
-          gameState={gameState}
-          setGameState={setGameState}
-          onClose={() => setShowCharacterCreator(false)}
-        />
-      )}
-
-      {/* World Map & Biome Exploration Modal */}
-      {showWorldMap && (
-        <WorldMapModal
-          gameState={gameState}
-          setGameState={setGameState}
-          onClose={() => setShowWorldMap(false)}
-          onFastTravel={(districtId) => handleDockDistrict(districtId)}
-        />
-      )}
-
-      {/* Wardrobe & Gear Rig Modal */}
-      {showWardrobe && (
-        <GearRigsModal
-          gameState={gameState}
-          setGameState={setGameState}
-          onClose={() => setShowWardrobe(false)}
-        />
-      )}
-
-      {/* Lore Codex Modal */}
-      {showCodex && (
-        <CodexModal onClose={() => setShowCodex(false)} />
-      )}
-
-      {/* Undertow Den Moon-Dice Mini-Game Modal */}
-      {showUndertowGame && (
+      {/* Modals */}
+      {activeModal === 'undertow_dice' && (
         <UndertowGameModal
           gameState={gameState}
-          setGameState={setGameState}
-          onClose={() => setShowUndertowGame(false)}
+          onPlayDice={handlePlayDice}
+          onClose={() => setActiveModal(null)}
+        />
+      )}
+
+      {activeModal === 'skill_tree' && (
+        <SkillTreeModal
+          gameState={gameState}
+          onUnlockSkill={handleUnlockSkill}
+          onClose={() => setActiveModal(null)}
+        />
+      )}
+
+      {activeModal === 'upgrade_shop' && (
+        <UpgradeShopModal
+          gameState={gameState}
+          onUpgrade={handleUpgradeSkiff}
+          onClose={() => setActiveModal(null)}
+        />
+      )}
+
+      {activeModal === 'wardrobe' && (
+        <GearRigsModal
+          gameState={gameState}
+          onEquipRig={handleEquipRig}
+          onClose={() => setActiveModal(null)}
+        />
+      )}
+
+      {activeModal === 'world_map' && (
+        <WorldMapModal
+          gameState={gameState}
+          onSetWaypoint={handleSetWaypoint}
+          onClearWaypoint={handleClearWaypoint}
+          onClose={() => setActiveModal(null)}
+        />
+      )}
+
+      {activeModal === 'codex' && (
+        <CodexModal
+          onClose={() => setActiveModal(null)}
+        />
+      )}
+
+      {activeModal === 'character_creator' && (
+        <CharacterCreatorModal
+          gameState={gameState}
+          onUpdateCharacter={handleUpdateCharacter}
+          onClose={() => setActiveModal(null)}
+        />
+      )}
+
+      {activeModal === 'quest_drawer' && (
+        <QuestDrawer
+          gameState={gameState}
+          onClose={() => setActiveModal(null)}
         />
       )}
     </div>
   );
 }
+
+export default App;

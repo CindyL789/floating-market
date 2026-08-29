@@ -1,103 +1,80 @@
 import React from 'react';
-import { GameState, DialogueNode } from '../types';
+import { GameState, DialogueChoice } from '../types';
 import { NPCS, DIALOGUE_TREES } from '../data/gameData';
-import { sound } from '../utils/audio';
-import { MessageSquare, Sparkles, X, Check } from 'lucide-react';
+import { X, Sparkles, ChevronRight } from 'lucide-react';
 
-interface Props {
+interface DialogueModalProps {
   gameState: GameState;
-  setGameState: React.Dispatch<React.SetStateAction<GameState>>;
+  onChoiceSelected: (choice: DialogueChoice) => void;
   onClose: () => void;
 }
 
-export const DialogueModal: React.FC<Props> = ({ gameState, setGameState, onClose }) => {
+export const DialogueModal: React.FC<DialogueModalProps> = ({
+  gameState,
+  onChoiceSelected,
+  onClose
+}) => {
   const npcId = gameState.activeNpcId;
-  const npc = npcId ? NPCS[npcId] : null;
-  const activeNodeId = gameState.activeDialogueNodeId || npc?.dialogueTreeId || 'madame_lin_start';
-  const node: DialogueNode | undefined = DIALOGUE_TREES[activeNodeId];
+  if (!npcId) return null;
 
-  if (!npc || !node) return null;
+  const npc = NPCS[npcId];
+  if (!npc) return null;
 
-  const handleChoice = (choice: typeof node.choices[0]) => {
-    sound.playMoonChime(520);
-    if (choice.action) {
-      choice.action(gameState, setGameState);
-    }
-    if (choice.nextNodeId) {
-      setGameState(prev => ({
-        ...prev,
-        activeDialogueNodeId: choice.nextNodeId || null
-      }));
-    } else {
-      onClose();
-    }
-  };
+  const nodeId = gameState.activeDialogueNodeId || npc.dialogueTreeId;
+  const node = DIALOGUE_TREES[nodeId];
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-md animate-fade-in">
-      <div className="relative w-full max-w-2xl bg-slate-900 border border-slate-700/80 rounded-3xl p-6 shadow-2xl overflow-hidden flex flex-col">
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/75 backdrop-blur-sm animate-fadeIn">
+      <div className="w-full max-w-2xl bg-sky-950/95 border border-sky-800/80 rounded-2xl shadow-2xl overflow-hidden flex flex-col">
         {/* Header */}
-        <div className="flex items-center justify-between pb-4 border-b border-slate-800">
-          <div className="flex items-center gap-3.5">
-            {npc.portraitImage ? (
-              <div className="relative w-14 h-14 rounded-2xl overflow-hidden border-2 border-sky-400/60 shadow-lg shadow-sky-500/20 shrink-0 group">
-                <img
-                  src={npc.portraitImage}
-                  alt={npc.name}
-                  referrerPolicy="no-referrer"
-                  className="w-full h-full object-cover group-hover:scale-105 transition-transform"
-                />
-                <div className="absolute inset-0 ring-1 ring-inset ring-sky-300/30 rounded-2xl pointer-events-none" />
-              </div>
+        <div className="p-4 border-b border-sky-800/60 flex items-center justify-between bg-sky-900/40">
+          <div className="flex items-center space-x-3">
+            {npc.portrait ? (
+              <img src={npc.portrait} alt={npc.name} className="w-12 h-12 rounded-full object-cover border-2 border-moon-cyan shadow-md shadow-moon-cyan/20" />
             ) : (
-              <div className="w-12 h-12 rounded-2xl bg-slate-950 border border-sky-500/30 flex items-center justify-center text-2xl shadow-inner shrink-0">
-                {node.portrait}
+              <div className="w-12 h-12 rounded-full bg-sky-800 border border-sky-700 flex items-center justify-center text-2xl">
+                {npc.iconEmoji}
               </div>
             )}
             <div>
-              <div className="flex items-center gap-2">
-                <h2 className="text-lg font-bold text-slate-100 font-fantasy">{node.speaker}</h2>
-                {npc.portraitImage && (
-                  <span className="text-[10px] px-2 py-0.5 rounded-full bg-sky-500/20 text-sky-300 border border-sky-500/30 font-medium">
-                    Illustrated Agent
-                  </span>
-                )}
-              </div>
-              <p className="text-xs text-sky-400 font-semibold">{npc.title}</p>
+              <h3 className="font-cinzel text-lg font-bold text-slate-100">{npc.name}</h3>
+              <p className="text-xs text-moon-cyan">{npc.title}</p>
             </div>
           </div>
+
           <button
-            id="btn-close-dialogue"
             onClick={onClose}
-            className="w-8 h-8 rounded-full bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-slate-200 flex items-center justify-center transition-colors"
+            className="p-1.5 rounded-lg bg-sky-900/60 hover:bg-sky-800 text-slate-300 hover:text-white transition-colors"
           >
-            <X className="w-4 h-4" />
+            <X size={18} />
           </button>
         </div>
 
-        {/* Dialogue Body */}
-        <div className="py-6 min-h-[140px] flex items-center">
-          <p className="font-lore text-base md:text-lg text-slate-200 leading-relaxed italic">
-            "{node.text}"
-          </p>
-        </div>
+        {/* Dialogue Box */}
+        <div className="p-6 space-y-6">
+          <div className="p-4 rounded-xl bg-sky-900/40 border border-sky-800/50 text-slate-200 text-sm leading-relaxed min-h-[90px] flex items-center">
+            <p>{node ? node.text : npc.greeting}</p>
+          </div>
 
-        {/* Response Choices */}
-        <div className="space-y-2.5 pt-4 border-t border-slate-800">
-          <span className="text-[10px] uppercase font-bold tracking-wider text-slate-400 block mb-1">
-            Choose Response
-          </span>
-          {node.choices.map((choice, idx) => (
-            <button
-              key={idx}
-              id={`btn-dialogue-choice-${idx}`}
-              onClick={() => handleChoice(choice)}
-              className="w-full text-left p-3.5 rounded-2xl bg-slate-950/70 hover:bg-sky-950/50 border border-slate-800 hover:border-sky-500/50 text-slate-200 text-xs md:text-sm font-medium transition-all flex items-center justify-between group"
-            >
-              <span>{choice.text}</span>
-              <Sparkles className="w-4 h-4 text-sky-400 opacity-0 group-hover:opacity-100 transition-opacity" />
-            </button>
-          ))}
+          {/* Choices */}
+          <div className="space-y-2">
+            <p className="text-[11px] font-mono font-bold text-lantern-amber uppercase">Responses // Actions</p>
+            <div className="space-y-2">
+              {(node?.choices || [{ text: 'Depart.', nextNodeId: undefined }]).map((choice, idx) => (
+                <button
+                  key={idx}
+                  onClick={() => onChoiceSelected(choice)}
+                  className="w-full text-left p-3.5 rounded-xl bg-sky-900/50 hover:bg-sky-800/70 border border-sky-800/60 hover:border-moon-cyan/50 text-xs text-slate-200 hover:text-moon-cyan font-medium transition-all flex items-center justify-between group"
+                >
+                  <span className="flex items-center space-x-2">
+                    <span className="text-moon-cyan text-sm">✦</span>
+                    <span>{choice.text}</span>
+                  </span>
+                  <ChevronRight size={14} className="text-slate-500 group-hover:text-moon-cyan group-hover:translate-x-0.5 transition-transform" />
+                </button>
+              ))}
+            </div>
+          </div>
         </div>
       </div>
     </div>

@@ -1,58 +1,39 @@
-export type DistrictId = 
-  | 'lantern_bazaar'
-  | 'undertow_den'
-  | 'storm_anchor_shrine'
-  | 'pilgrim_haven'
-  | 'celestial_pier';
-
-export type RigId = 
-  | 'standard_courier'
-  | 'dawn_dock'
-  | 'storm_run'
-  | 'undertow_civilian';
-
+export type DistrictId = 'lantern_bazaar' | 'undertow_den' | 'storm_anchor_shrine' | 'pilgrim_haven' | 'celestial_pier';
+export type RigId = 'standard_courier' | 'dawn_dock' | 'storm_run' | 'undertow_civilian';
 export type LanternMode = 'beacon' | 'signal' | 'ward';
-
-export type BiomeId = 
-  | 'lantern_shallows'
-  | 'undertow_abyss'
-  | 'storm_anchor_rift'
-  | 'pilgrim_drift'
-  | 'celestial_zenith'
-  | 'maelstrom_vortex';
+export type BiomeId = 'lantern_shallows' | 'undertow_abyss' | 'storm_anchor_rift' | 'pilgrim_drift' | 'celestial_zenith' | 'maelstrom_vortex';
+export type SkillCategory = 'lantern' | 'hull_mobility' | 'koi_synergy' | 'trade_prestige';
 
 export interface CharacterCustomization {
   name: string;
   title: string;
   pronouns: string;
-  bodyType: 'athletic' | 'slender' | 'broad' | 'nimble';
+  bodyType: string;
   skinTone: string;
-  faceShape: 'sharp' | 'round' | 'chiseled' | 'soft' | 'angular';
-  eyeStyle: 'almond' | 'wide' | 'focused' | 'mystic_glow';
+  faceShape: string;
+  eyeStyle: string;
   eyeColor: string;
-  eyebrows: 'arched' | 'thick' | 'straight' | 'feathered';
-  facialFeature: 'none' | 'star_talisman' | 'storm_scar' | 'cloud_tattoos' | 'koi_whisker_mark' | 'porcelain_freckles' | 'gilded_eyeshadow';
-  hairstyle: 'windblown_crest' | 'braided_topknot' | 'flowing_strands' | 'courier_shave' | 'twin_loop_braids' | 'undercut_dreadlocks' | 'celestial_bob' | 'wild_drift';
+  eyebrows: string;
+  facialFeature: string;
+  hairstyle: string;
   hairColor: string;
   initialOutfit: RigId;
-  accessory: 'none' | 'gilded_goggles' | 'lantern_earring' | 'aviator_monocle' | 'silk_face_veil' | 'brass_hairpin';
-  koiCompanionColor: 'azure_glow' | 'rose_gold' | 'midnight_purple' | 'emerald_jade' | 'solar_amber';
-  backstory: 'guild_apprentice' | 'undertow_salvager' | 'cloud_monk_novice' | 'exiled_astronomer';
+  accessory: string;
+  koiCompanionColor: string;
+  backstory: string;
 }
-
-export type SkillCategory = 'lantern' | 'hull_mobility' | 'koi_synergy' | 'trade_prestige';
 
 export interface SkillNode {
   id: string;
   name: string;
   category: SkillCategory;
-  tier: number; // 1, 2, 3, 4
+  tier: number;
   costFavors: number;
   icon: string;
   description: string;
   effectLabel: string;
   statsEffectDescription: string;
-  prerequisites: string[];
+  prerequisites?: string[];
 }
 
 export interface BiomeRegion {
@@ -60,11 +41,14 @@ export interface BiomeRegion {
   name: string;
   subtitle: string;
   description: string;
-  dangerLevel: 'Low' | 'Moderate' | 'Dangerous' | 'Lethal';
+  dangerLevel: string;
   weather: string;
   color: string;
   accentColor: string;
-  bounds: { minX: number; maxX: number; minY: number; maxY: number };
+  minX: number;
+  maxX: number;
+  minY: number;
+  maxY: number;
   specialDrop: string;
   windCurrent: string;
 }
@@ -72,13 +56,14 @@ export interface BiomeRegion {
 export interface LandmarkInfo {
   id: string;
   name: string;
-  type: 'city_platform' | 'ancient_wonder' | 'natural_stream' | 'hazard_zone' | 'salvage_wreck';
+  type: string;
   districtId?: DistrictId;
-  coordinates: { x: number; y: number };
+  x: number;
+  y: number;
   icon: string;
   description: string;
   discoveryBonus: string;
-  discovered: boolean;
+  discovered?: boolean;
   image?: string;
 }
 
@@ -86,7 +71,7 @@ export interface ArtWorkEntry {
   id: string;
   title: string;
   subtitle: string;
-  category: 'agent' | 'district' | 'biome' | 'lore';
+  category: string;
   image: string;
   description: string;
   loreQuote: string;
@@ -108,7 +93,7 @@ export interface GearRig {
 export interface InventoryItem {
   id: string;
   name: string;
-  category: 'craft' | 'contraband' | 'talisman' | 'packet' | 'upgrade';
+  category: string;
   description: string;
   count: number;
   iconName: string;
@@ -117,8 +102,8 @@ export interface InventoryItem {
 
 export interface Quest {
   id: string;
-  title: string;
   chapter: number;
+  title: string;
   giver: string;
   giverLocation: DistrictId;
   destination: DistrictId;
@@ -140,7 +125,7 @@ export interface DeliveryContract {
   origin: DistrictId;
   destination: DistrictId;
   cargo: string;
-  urgency: 'Standard' | 'Urgent' | 'Perilous';
+  urgency: string;
   hazard: string;
   rewardDroplets: number;
   rewardFavors: number;
@@ -155,8 +140,17 @@ export interface NPC {
   avatarMood: string;
   greeting: string;
   dialogueTreeId: string;
-  affinity: number; // 0-100
-  portraitImage?: string;
+  affinity: number;
+  portrait?: string;
+  iconEmoji: string;
+}
+
+export interface DialogueChoice {
+  text: string;
+  nextNodeId?: string;
+  actionType?: string;
+  requiredFavor?: number;
+  requiredRig?: RigId;
 }
 
 export interface DialogueNode {
@@ -164,13 +158,7 @@ export interface DialogueNode {
   speaker: string;
   portrait: string;
   text: string;
-  choices: {
-    text: string;
-    nextNodeId?: string;
-    action?: (state: GameState, setState: (updater: (prev: GameState) => GameState) => void) => void;
-    requiredFavor?: number;
-    requiredRig?: RigId;
-  }[];
+  choices: DialogueChoice[];
 }
 
 export interface DistrictInfo {
@@ -180,22 +168,22 @@ export interface DistrictInfo {
   description: string;
   visualDirection: string;
   designTakeaway: string;
-  coordinates: { x: number; y: number };
+  x: number;
+  y: number;
   accentColor: string;
   bgGradient: string;
-  ambientChimeNote: number;
   npcs: string[];
-  availableServices: ('contracts' | 'trader' | 'dice_game' | 'shrine_altar' | 'rig_smith')[];
+  availableServices: string[];
   image?: string;
 }
 
 export interface PlayerStats {
-  hullIntegrity: number; // 0 - 100
+  hullIntegrity: number;
   maxHull: number;
   speedLevel: number;
-  lanternPower: number; // 0 - 100
+  lanternPower: number;
   maxLanternPower: number;
-  koiAffinity: number; // 0 - 100
+  koiAffinity: number;
 }
 
 export interface UpgradeLevels {
@@ -204,60 +192,70 @@ export interface UpgradeLevels {
   weapon: number;
 }
 
+export interface LogMessage {
+  id: string;
+  text: string;
+  time: string;
+  type: string;
+}
+
+export interface Waypoint {
+  x: number;
+  y: number;
+  label: string;
+}
+
+export interface Reputation {
+  lanternGuild: number;
+  undertowSyndicate: number;
+  anchorMonks: number;
+}
+
 export interface GameState {
-  // Navigation & Location
-  currentDistrict: DistrictId | null; // null if in sky_flight
-  viewMode: 'flight' | 'district' | 'dialogue' | 'contracts' | 'wardrobe' | 'codex' | 'shop' | 'undertow_game';
-  
-  // Position in sky
-  playerPos: { x: number; y: number };
-  playerVelocity: { x: number; y: number };
+  currentDistrict: DistrictId | null;
+  viewMode: 'flight' | 'district' | 'dialogue';
+  playerX: number;
+  playerY: number;
+  playerVelocityX: number;
+  playerVelocityY: number;
   playerAngle: number;
-  
-  // Stats & Resources
   stats: PlayerStats;
   upgrades: UpgradeLevels;
-  droplets: number; // Moon-Luminescence Droplets / upgrade credits
-  favors: number; // Brass Seals / Favors
-  stormJars: number; // Weather jars
-  reputation: {
-    lanternGuild: number;
-    undertowSyndicate: number;
-    anchorMonks: number;
-  };
-  
-  // Active Gear & Lantern
+  droplets: number;
+  favors: number;
+  stormJars: number;
+  reputation: Reputation;
   activeRig: RigId;
   unlockedRigs: RigId[];
   lanternMode: LanternMode;
-  
-  // Quests
   activeQuests: Quest[];
   completedQuestIds: string[];
   currentMainChapter: number;
   activeContract: DeliveryContract | null;
-  
-  // Inventory
   inventory: InventoryItem[];
-  
-  // Dialogue state
   activeDialogueNodeId: string | null;
   activeNpcId: string | null;
-  
-  // Character Customization
   character: CharacterCustomization;
-  
-  // World Map & Exploration
   discoveredLandmarks: string[];
-  mapWaypoint: { x: number; y: number; label: string } | null;
-  
-  // Attunement Skill Tree Passives
+  mapWaypoint: Waypoint | null;
   unlockedSkills: string[];
-  
-  // Sound
   soundEnabled: boolean;
   volume: number;
-  
-  // UI Notifications & logs
-  logMessages: { id: string; text: string; time: string; type: 'info' | 'reward' | 'hazard' | 'story' }[];
+  logMessages: LogMessage[];
+}
+
+export interface FlightTelemetry {
+  speed: number;
+  nearbyDistrict: DistrictId | null;
+  nearbyDistance: number;
+  inWind: boolean;
+  inStorm: boolean;
+  waypointDistance: number | null;
+  lanternMode: LanternMode;
+  playerX: number;
+  playerY: number;
+  playerAngle: number;
+  gliderCharges: number;
+  grappleCharges: number;
+  shockCharges: number;
 }
